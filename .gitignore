@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.pyc
+*.pyo
+
+# local runtime / generated artifacts
+.env
+*.epub
+tmp/
+jobs/
+cache/
+logs/
+dist/
+build/
+*.egg-info/
