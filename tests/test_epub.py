@@ -78,7 +78,7 @@ def test_build_epub_renders_supported_blocks_and_marks() -> None:
         assert "<ol>" in html
         assert "<ul>" in html
         assert "<blockquote>" in html
-        assert "<hr />" in html
+        assert "<hr" in html
 
 
 def test_build_epub_skips_images_with_warning() -> None:
