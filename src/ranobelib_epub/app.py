@@ -6,13 +6,14 @@ from html import escape
 from typing import Annotated, Any, Protocol
 
 from fastapi import Depends, FastAPI, Form, Query
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from ranobelib_epub.build import build_selected_chapter_epub
 from ranobelib_epub.epub import BookMetadata
 from ranobelib_epub.images import HttpxImageAssetFetcher, ImageFetchLimits
 from ranobelib_epub.inventory import ChapterInventory, fetch_chapter_inventory
 from ranobelib_epub.inventory import ChapterBranchVariant, HttpxInventoryTransport
+from ranobelib_epub.jobs import BuildJobManager, BuildJobRequest
 from ranobelib_epub.ranobelib import RanobeLibTitleUrl, parse_title_url
 from ranobelib_epub.title_detail import (
     HttpxTitleDetailTransport,
@@ -25,6 +26,7 @@ app = FastAPI(title="RanobeLib EPUB Builder")
 MAX_SYNC_BUILD_VARIANTS = 100
 _SAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
+BUILD_JOBS = BuildJobManager(max_active_jobs=1)
 
 
 class InventoryService(Protocol):
@@ -67,6 +69,7 @@ class BuildService(Protocol):
         variants: tuple[ChapterBranchVariant, ...],
         *,
         include_images: bool = False,
+        progress_callback: Any | None = None,
     ) -> bytes: ...
 
 
@@ -81,6 +84,7 @@ class RanobeLibBuildService:
         variants: tuple[ChapterBranchVariant, ...],
         *,
         include_images: bool = False,
+        progress_callback: Any | None = None,
     ) -> bytes:
         result = build_selected_chapter_epub(
             title.slug,
@@ -89,6 +93,7 @@ class RanobeLibBuildService:
             self._transport,
             image_fetcher=HttpxImageAssetFetcher() if include_images else None,
             image_limits=ImageFetchLimits() if include_images else None,
+            progress_callback=progress_callback,
         )
         return result.epub_bytes
 
@@ -240,6 +245,94 @@ def build_epub_download(
         content=epub_bytes,
         media_type="application/epub+zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/build-jobs", response_class=JSONResponse, response_model=None)
+def start_build_job(
+    title_url: Annotated[str, Form(min_length=1)],
+    selected_variant: Annotated[list[str] | None, Form()] = None,
+    bulk_variant: Annotated[list[str] | None, Form()] = None,
+    book_title: Annotated[str | None, Form()] = None,
+    author: Annotated[str | None, Form()] = None,
+    translator: Annotated[str | None, Form()] = None,
+    team: Annotated[str | None, Form()] = None,
+    language: Annotated[str | None, Form()] = None,
+    bulk_branch_id: Annotated[str | None, Form()] = None,
+    volume_from: Annotated[str | None, Form()] = None,
+    volume_to: Annotated[str | None, Form()] = None,
+    chapter_from: Annotated[str | None, Form()] = None,
+    chapter_to: Annotated[str | None, Form()] = None,
+    include_images: Annotated[bool, Form()] = False,
+    selection_mode: Annotated[str | None, Form()] = None,
+    service: BuildService = Depends(get_build_service),
+) -> JSONResponse:
+    try:
+        title = parse_title_url(title_url)
+        metadata = _book_metadata_from_form(
+            title,
+            book_title=book_title,
+            author=author,
+            translator=translator,
+            team=team,
+            language=language,
+        )
+        variants = _selected_variants(
+            selected_variant or [],
+            bulk_variant or [],
+            bulk_branch_id=bulk_branch_id,
+            volume_from=volume_from,
+            volume_to=volume_to,
+            chapter_from=chapter_from,
+            chapter_to=chapter_to,
+            selection_mode=selection_mode,
+        )
+        job_id = BUILD_JOBS.start(
+            BuildJobRequest(
+                title=title,
+                metadata=metadata,
+                variants=variants,
+                include_images=include_images,
+                filename=_epub_filename(title),
+            ),
+            service,
+        )
+    except RuntimeError as exc:
+        return JSONResponse({"message": str(exc)}, status_code=429)
+    except ValueError as exc:
+        return JSONResponse({"message": str(exc)}, status_code=400)
+    return JSONResponse({"job_id": job_id}, status_code=202)
+
+
+@app.get("/build-jobs/{job_id}", response_class=JSONResponse, response_model=None)
+def build_job_status(job_id: str) -> JSONResponse:
+    job = BUILD_JOBS.get(job_id)
+    if job is None:
+        return JSONResponse(
+            {"message": "Build job was not found or has expired."}, status_code=404
+        )
+    return JSONResponse(job.public_dict())
+
+
+@app.get("/build-jobs/{job_id}/download", response_class=Response, response_model=None)
+def download_build_job(job_id: str) -> Response:
+    job = BUILD_JOBS.get(job_id)
+    if job is None:
+        return JSONResponse(
+            {"message": "Build job was not found or has expired."}, status_code=404
+        )
+    if job.status == "failed":
+        return JSONResponse(
+            {"message": job.error or "Build job failed."}, status_code=409
+        )
+    if job.status != "ready" or job.epub_bytes is None:
+        return JSONResponse({"message": "Build job is not ready yet."}, status_code=409)
+    return Response(
+        content=job.epub_bytes,
+        media_type="application/epub+zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{job.filename or "ranobelib-title.epub"}"'
+        },
     )
 
 
@@ -592,7 +685,7 @@ def _inventory_page(
     const filenameFromDisposition = (header) => {{
       const fallback = 'ranobelib-title.epub';
       if (!header) return fallback;
-      const utf8 = header.match(/filename\*=UTF-8''([^;]+)/i);
+      const utf8 = header.match(/filename\\*=UTF-8''([^;]+)/i);
       if (utf8) return decodeURIComponent(utf8[1]).replace(/[\\/]/g, '_') || fallback;
       const ascii = header.match(/filename="?([^";]+)"?/i);
       return ascii ? ascii[1].replace(/[\\/]/g, '_') : fallback;
@@ -603,6 +696,24 @@ def _inventory_page(
       link.href = url; link.download = filename; link.style.display = 'none';
       document.body.appendChild(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
+    }};
+    const pollJob = async (jobId, form) => {{
+      const statusText = form.querySelector('[data-build-status-message]');
+      const statusCounts = form.querySelector('[data-build-status-counts]');
+      while (true) {{
+        const response = await fetch(`/build-jobs/${{encodeURIComponent(jobId)}}`, {{headers: {{'Accept': 'application/json'}}}});
+        const payload = await response.json().catch(() => ({{message: 'Could not read build status.'}}));
+        if (!response.ok) throw new Error(payload.message || 'Build status failed.');
+        if (statusText) statusText.textContent = payload.message || payload.status || 'Building EPUB…';
+        const bits = [];
+        if (payload.chapter_current !== undefined && payload.chapter_total !== undefined) bits.push(`Chapter ${{payload.chapter_current}} / ${{payload.chapter_total}}`);
+        if (payload.image_current !== undefined && payload.image_total !== undefined) bits.push(`Image ${{payload.image_current}} / ${{payload.image_total}}`);
+        else if (payload.image_current !== undefined) bits.push(`Images fetched: ${{payload.image_current}}`);
+        if (statusCounts) statusCounts.textContent = bits.join(' · ');
+        if (payload.status === 'ready') return payload.download_url || `/build-jobs/${{encodeURIComponent(jobId)}}/download`;
+        if (payload.status === 'failed') throw new Error(payload.error || payload.message || 'Build failed.');
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }}
     }};
     document.querySelectorAll('form[data-branch-form]').forEach((form) => {{
       form.addEventListener('submit', async (event) => {{
@@ -623,17 +734,22 @@ def _inventory_page(
         const body = submitter ? new FormData(form, submitter) : new FormData(form);
         const originalText = submitter ? submitter.textContent : '';
         form.classList.remove('is-complete', 'has-build-error');
+        const readyLink = form.querySelector('[data-build-download-link]');
+        if (readyLink) {{ readyLink.hidden = true; readyLink.removeAttribute('href'); }}
         if (submitter) {{ submitter.disabled = true; submitter.textContent = 'Building EPUB…'; }}
         form.classList.add('is-building');
         try {{
-          const response = await fetch(form.action, {{ method: 'POST', body }});
-          const contentType = response.headers.get('content-type') || '';
-          if (!response.ok || !contentType.includes('application/epub+zip')) {{
-            const message = response.ok ? 'Build failed: server did not return an EPUB.' : await response.text();
-            throw new Error(message.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || 'Build failed.');
+          const start = await fetch('/build-jobs', {{ method: 'POST', body, headers: {{'Accept': 'application/json'}} }});
+          const payload = await start.json().catch(() => ({{message: 'Could not start async build.'}}));
+          if (!start.ok || !payload.job_id) throw new Error(payload.message || 'Could not start async build.');
+          const downloadUrl = await pollJob(payload.job_id, form);
+          if (readyLink) {{ readyLink.href = downloadUrl; readyLink.hidden = false; }}
+          const response = await fetch(downloadUrl, {{headers: {{'Accept': 'application/epub+zip'}}}});
+          if (!response.ok) {{
+            const errorPayload = await response.json().catch(() => ({{message: 'Download failed.'}}));
+            throw new Error(errorPayload.message || 'Download failed.');
           }}
-          const blob = await response.blob();
-          triggerDownload(blob, filenameFromDisposition(response.headers.get('content-disposition')));
+          triggerDownload(await response.blob(), filenameFromDisposition(response.headers.get('content-disposition')));
           form.classList.add('is-complete');
         }} catch (error) {{
           const target = form.querySelector('[data-build-error-message]');
@@ -757,12 +873,14 @@ def _branch_card(
             </div>
             <div class="progress-note" role="status" aria-live="polite" data-build-active-state>
               <div class="bar" aria-hidden="true"></div>
-              <p><strong>Building EPUB…</strong></p>
+              <p><strong>Building EPUB…</strong> <span data-build-status-message>Queued; waiting to start EPUB build.</span></p>
+              <p data-build-status-counts class="muted"></p>
               <p>Fetching selected chapters and optional images, then packaging EPUB. Keep this tab open.</p>
               <p class="muted">Selected chapter count is shown above when JavaScript is available; this branch has {len(variants)} buildable chapters, images follow the toggle, sync limit {MAX_SYNC_BUILD_VARIANTS}.</p>
             </div>
             <div class="build-complete" role="status" aria-live="polite" data-build-complete-state>
-              <p><strong>Download ready / Download started.</strong></p>
+              <p><strong>Download ready / Download started.</strong> If the browser blocked the automatic download, submit this build again and use the downloaded file prompt.</p>
+              <p><a data-build-download-link hidden>Download EPUB</a></p>
             </div>
             <div class="build-error" role="alert" data-build-error-state>
               <p><strong>Build failed.</strong> <span data-build-error-message>Please review the request and try again.</span></p>

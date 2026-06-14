@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence, cast
+from typing import Callable, Literal, Sequence, cast
 
 from ranobelib_epub.chapter_client import fetch_chapter_content
 from ranobelib_epub.content import (
@@ -35,6 +35,10 @@ class ChapterBuildResult:
 
 
 ChapterVariantSelection = Sequence[ChapterBranchVariant | BuildableChapterVariant]
+BuildProgressStage = Literal[
+    "starting", "fetching_chapters", "fetching_images", "building_epub"
+]
+BuildProgressCallback = Callable[..., None]
 
 
 def build_selected_chapter_epub(
@@ -46,6 +50,7 @@ def build_selected_chapter_epub(
     base_url: str = RANOBELIB_API_BASE_URL,
     image_fetcher: ImageAssetFetcher | None = None,
     image_limits: ImageFetchLimits | None = None,
+    progress_callback: BuildProgressCallback | None = None,
 ) -> ChapterBuildResult:
     """Fetch selected buildable chapter variants in order and build EPUB bytes.
 
@@ -57,11 +62,21 @@ def build_selected_chapter_epub(
     """
 
     buildable_variants = _validate_selection(selected_variants)
+    if progress_callback is not None:
+        progress_callback("starting", message="Starting EPUB build")
 
     chapters: list[NormalizedChapter] = []
     requests: list[ChapterRequest] = []
     warnings: list[str] = []
-    for variant in buildable_variants:
+    chapter_total = len(buildable_variants)
+    for index, variant in enumerate(buildable_variants, start=1):
+        if progress_callback is not None:
+            progress_callback(
+                "fetching_chapters",
+                message=f"Fetching chapter {index} of {chapter_total}",
+                chapter_current=index,
+                chapter_total=chapter_total,
+            )
         content = fetch_chapter_content(slug, variant, transport, base_url=base_url)
         chapters.append(content.chapter)
         requests.append(content.request)
@@ -72,10 +87,15 @@ def build_selected_chapter_epub(
 
     image_assets = None
     if image_fetcher is not None:
+        if progress_callback is not None:
+            progress_callback("fetching_images", message="Fetching images")
         image_assets, image_warnings = collect_image_assets(
-            normalized_chapters, image_fetcher, image_limits
+            normalized_chapters, image_fetcher, image_limits, progress_callback=progress_callback
         )
         warnings.extend(image_warnings)
+
+    if progress_callback is not None:
+        progress_callback("building_epub", message="Building EPUB")
 
     return ChapterBuildResult(
         epub_bytes=build_epub_bytes(metadata, normalized_chapters, image_assets=image_assets),

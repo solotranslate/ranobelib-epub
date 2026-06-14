@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Protocol
+from typing import Callable, Iterable, Protocol
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -90,6 +90,8 @@ def collect_image_assets(
     chapters: Iterable[NormalizedChapter],
     fetcher: ImageAssetFetcher,
     limits: ImageFetchLimits | None = None,
+    *,
+    progress_callback: Callable[..., None] | None = None,
 ) -> tuple[dict[str, ImageAsset], tuple[str, ...]]:
     """Fetch bounded in-memory image assets referenced by normalized image blocks."""
 
@@ -99,7 +101,11 @@ def collect_image_assets(
     total_bytes = 0
     next_index = 1
 
-    for image in _iter_images(chapters):
+    images = tuple(_iter_images(chapters))
+    image_total = len({image_source_url(image) for image in images if image_source_url(image)})
+
+    image_current = 0
+    for image in images:
         source_url = image_source_url(image)
         image_name = image.name or image.alt or source_url or "unknown image"
         if not source_url:
@@ -112,6 +118,14 @@ def collect_image_assets(
         if len(assets) >= active_limits.max_image_count:
             warnings.append("Image limit reached; image skipped")
             continue
+        image_current += 1
+        if progress_callback is not None:
+            progress_callback(
+                "fetching_images",
+                message=f"Fetching image {image_current} of {image_total}",
+                image_current=image_current,
+                image_total=image_total,
+            )
         try:
             content, media_type = fetcher.fetch_image(source_url, active_limits)
         except Exception as exc:  # noqa: BLE001 - preserve non-strict build behavior.
