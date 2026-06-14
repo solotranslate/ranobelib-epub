@@ -17,6 +17,10 @@ A small web service where a user can paste a public RanobeLib title URL, select 
 - One active build at a time.
 - Runtime artifacts stay outside the repository.
 
+## VPS operations
+
+For VPS update, operation, smoke-check, troubleshooting, and safety-boundary guidance, see [docs/VPS_OPERATOR_RUNBOOK.md](docs/VPS_OPERATOR_RUNBOOK.md).
+
 ## Runtime paths
 
 Recommended VPS paths:
