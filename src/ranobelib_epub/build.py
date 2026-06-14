@@ -63,7 +63,7 @@ def build_selected_chapter_epub(
 
     buildable_variants = _validate_selection(selected_variants)
     if progress_callback is not None:
-        progress_callback("starting", message="Starting EPUB build")
+        progress_callback("starting", message="Начинаю сборку EPUB")
 
     chapters: list[NormalizedChapter] = []
     requests: list[ChapterRequest] = []
@@ -73,7 +73,7 @@ def build_selected_chapter_epub(
         if progress_callback is not None:
             progress_callback(
                 "fetching_chapters",
-                message=f"Fetching chapter {index} of {chapter_total}",
+                message=f"Загружаю главу {index} из {chapter_total}",
                 chapter_current=index,
                 chapter_total=chapter_total,
             )
@@ -88,14 +88,14 @@ def build_selected_chapter_epub(
     image_assets = None
     if image_fetcher is not None:
         if progress_callback is not None:
-            progress_callback("fetching_images", message="Fetching images")
+            progress_callback("fetching_images", message="Загружаю иллюстрации")
         image_assets, image_warnings = collect_image_assets(
             normalized_chapters, image_fetcher, image_limits, progress_callback=progress_callback
         )
         warnings.extend(image_warnings)
 
     if progress_callback is not None:
-        progress_callback("building_epub", message="Building EPUB")
+        progress_callback("building_epub", message="Упаковываю EPUB")
 
     return ChapterBuildResult(
         epub_bytes=build_epub_bytes(metadata, normalized_chapters, image_assets=image_assets),

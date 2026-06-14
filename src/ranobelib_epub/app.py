@@ -22,7 +22,7 @@ from ranobelib_epub.title_detail import (
     fetch_title_detail,
 )
 
-app = FastAPI(title="RanobeLib EPUB Builder")
+app = FastAPI(title="Сборщик EPUB для RanobeLib")
 MAX_SYNC_BUILD_VARIANTS = 100
 _SAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
@@ -114,7 +114,7 @@ def index() -> str:
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>RanobeLib EPUB Builder</title>
+  <title>Сборщик EPUB для RanobeLib</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body {
@@ -152,16 +152,16 @@ def index() -> str:
 </head>
 <body>
   <main class="card">
-    <h1>RanobeLib EPUB Builder</h1>
+    <h1>Сборщик EPUB для RanobeLib</h1>
     <p class="muted">
       Вставьте публичную ссылку на тайтл RanobeLib (/book/ или /manga/), чтобы посмотреть
-      read-only preview доступных глав и веток перед будущей сборкой EPUB.
+      предпросмотр доступных глав и веток перед сборкой EPUB (без изменений на RanobeLib).
     </p>
 
     <form action="/inventory" method="get">
       <label for="title_url">Ссылка на тайтл RanobeLib</label>
       <input id="title_url" name="title_url" placeholder="https://ranobelib.me/ru/book/12345--title-slug" required>
-      <button type="submit">Показать inventory</button>
+      <button type="submit">Показать список глав</button>
     </form>
   </main>
 </body>
@@ -309,7 +309,7 @@ def build_job_status(job_id: str) -> JSONResponse:
     job = BUILD_JOBS.get(job_id)
     if job is None:
         return JSONResponse(
-            {"message": "Build job was not found or has expired."}, status_code=404
+            {"message": "Задача сборки не найдена или устарела."}, status_code=404
         )
     return JSONResponse(job.public_dict())
 
@@ -319,14 +319,14 @@ def download_build_job(job_id: str) -> Response:
     job = BUILD_JOBS.get(job_id)
     if job is None:
         return JSONResponse(
-            {"message": "Build job was not found or has expired."}, status_code=404
+            {"message": "Задача сборки не найдена или устарела."}, status_code=404
         )
     if job.status == "failed":
         return JSONResponse(
-            {"message": job.error or "Build job failed."}, status_code=409
+            {"message": job.error or "Сборка не удалась."}, status_code=409
         )
     if job.status != "ready" or job.epub_bytes is None:
-        return JSONResponse({"message": "Build job is not ready yet."}, status_code=409)
+        return JSONResponse({"message": "Файл сборки ещё не готов."}, status_code=409)
     return Response(
         content=job.epub_bytes,
         media_type="application/epub+zip",
@@ -340,12 +340,12 @@ def _error_page(message: str, *, status_code: int) -> HTMLResponse:
     html = f"""
 <!doctype html>
 <html lang="ru">
-<head><meta charset="utf-8"><title>Inventory error</title></head>
+<head><meta charset="utf-8"><title>Ошибка предпросмотра</title></head>
 <body>
   <main>
-    <h1>Inventory preview error</h1>
+    <h1>Ошибка предпросмотра</h1>
     <p>{escape(message)}</p>
-    <p><a href="/">Back to form</a></p>
+    <p><a href="/">Вернуться к форме</a></p>
   </main>
 </body>
 </html>
@@ -367,11 +367,11 @@ def _book_metadata_from_form(
     else:
         normalized_title = _optional_text(book_title)
         if normalized_title is None:
-            raise ValueError("Book title must not be blank")
+            raise ValueError("Название книги не должно быть пустым")
 
     normalized_language = _optional_text(language) or "ru"
     if not _LANGUAGE_TAG.fullmatch(normalized_language):
-        raise ValueError("Language must be a valid language tag")
+        raise ValueError("Язык должен быть корректным языковым тегом")
 
     return BookMetadata(
         title=normalized_title,
@@ -397,18 +397,18 @@ def _selected_variants(
     selected: tuple[ChapterBranchVariant, ...]
     mode = _optional_text(selection_mode)
     if mode not in {None, "checked", "range"}:
-        raise ValueError("Selection mode is malformed")
+        raise ValueError("Некорректный режим выбора глав")
 
     if mode == "checked":
         if not raw_variants:
-            raise ValueError("Select at least one checked chapter variant")
+            raise ValueError("Отметьте хотя бы одну главу для сборки")
         selected = _dedupe_variants(
-            _parse_variant_values(raw_variants, source="Selected variant")
+            _parse_variant_values(raw_variants, source="Выбранная глава")
         )
     elif mode == "range":
         if not bulk_variants:
-            raise ValueError("Select at least one buildable chapter variant")
-        candidates = _parse_variant_values(bulk_variants, source="Bulk variant")
+            raise ValueError("Выберите хотя бы одну доступную для сборки главу")
+        candidates = _parse_variant_values(bulk_variants, source="Глава из диапазона")
         variants = _filter_bulk_variants(
             candidates,
             bulk_branch_id=bulk_branch_id,
@@ -418,12 +418,12 @@ def _selected_variants(
             chapter_to=chapter_to,
         )
         if not variants:
-            raise ValueError("Bulk selection did not match any buildable chapter variants")
+            raise ValueError("Выбранный диапазон не содержит доступных для сборки глав")
         selected = _dedupe_variants(variants)
     elif raw_variants:
-        selected = _dedupe_variants(_parse_variant_values(raw_variants, source="Selected variant"))
+        selected = _dedupe_variants(_parse_variant_values(raw_variants, source="Выбранная глава"))
     elif bulk_variants:
-        candidates = _parse_variant_values(bulk_variants, source="Bulk variant")
+        candidates = _parse_variant_values(bulk_variants, source="Глава из диапазона")
         variants = _filter_bulk_variants(
             candidates,
             bulk_branch_id=bulk_branch_id,
@@ -433,10 +433,10 @@ def _selected_variants(
             chapter_to=chapter_to,
         )
         if not variants:
-            raise ValueError("Bulk selection did not match any buildable chapter variants")
+            raise ValueError("Выбранный диапазон не содержит доступных для сборки глав")
         selected = _dedupe_variants(variants)
     else:
-        raise ValueError("Select at least one buildable chapter variant")
+        raise ValueError("Выберите хотя бы одну доступную для сборки главу")
 
     _enforce_sync_build_limit(selected)
     return selected
@@ -446,10 +446,10 @@ def _enforce_sync_build_limit(variants: tuple[ChapterBranchVariant, ...]) -> Non
     selected_count = len(variants)
     if selected_count > MAX_SYNC_BUILD_VARIANTS:
         raise ValueError(
-            "Synchronous build selection contains "
-            f"{selected_count} chapter variants, but the configured maximum is "
-            f"{MAX_SYNC_BUILD_VARIANTS}. Use branch/range filters or split large titles "
-            "into multiple EPUB builds."
+            "В синхронную сборку выбрано "
+            f"{selected_count} вариантов глав, но настроенный максимум — "
+            f"{MAX_SYNC_BUILD_VARIANTS}. Используйте фильтры ветки/диапазона "
+            "или разделите большой тайтл на несколько EPUB."
         )
 
 
@@ -459,13 +459,13 @@ def _parse_variant_values(raw_variants: list[str], *, source: str) -> tuple[Chap
         try:
             payload = json.loads(raw_variant)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"{source} at position {index} is malformed") from exc
+            raise ValueError(f"{source} на позиции {index} содержит некорректные данные") from exc
         if not isinstance(payload, dict):
-            raise ValueError(f"{source} at position {index} is malformed")
+            raise ValueError(f"{source} на позиции {index} содержит некорректные данные")
 
         variant = _variant_from_form_payload(payload, index, source=source)
         if not variant.is_buildable:
-            raise ValueError(f"{source} at position {index} is not buildable")
+            raise ValueError(f"{source} на позиции {index} недоступна для сборки")
         variants.append(variant)
     return tuple(variants)
 
@@ -480,14 +480,14 @@ def _filter_bulk_variants(
     chapter_to: str | None,
 ) -> tuple[ChapterBranchVariant, ...]:
     branch = _optional_text(bulk_branch_id)
-    vol_min = _optional_number(volume_from, "Volume from")
-    vol_max = _optional_number(volume_to, "Volume to")
-    ch_min = _optional_number(chapter_from, "Chapter from")
-    ch_max = _optional_number(chapter_to, "Chapter to")
+    vol_min = _optional_number(volume_from, "Том от")
+    vol_max = _optional_number(volume_to, "Том до")
+    ch_min = _optional_number(chapter_from, "Глава от")
+    ch_max = _optional_number(chapter_to, "Глава до")
     if vol_min is not None and vol_max is not None and vol_min > vol_max:
-        raise ValueError("Volume range start must be less than or equal to range end")
+        raise ValueError("Начало диапазона томов должно быть меньше или равно концу диапазона")
     if ch_min is not None and ch_max is not None and ch_min > ch_max:
-        raise ValueError("Chapter range start must be less than or equal to range end")
+        raise ValueError("Начало диапазона глав должно быть меньше или равно концу диапазона")
 
     selected: list[ChapterBranchVariant] = []
     for variant in variants:
@@ -520,7 +520,7 @@ def _optional_number(value: str | None, label: str) -> float | None:
         return None
     parsed = _parse_number(text)
     if parsed is None:
-        raise ValueError(f"{label} must be a number")
+        raise ValueError(f"{label} должно быть числом")
     return parsed
 
 
@@ -570,7 +570,7 @@ def _variant_from_form_payload(
         "is_default_branch",
     }
     if any(key not in allowed for key in payload):
-        raise ValueError(f"{source} at position {index} is malformed")
+        raise ValueError(f"{source} на позиции {index} содержит некорректные данные")
     return ChapterBranchVariant(
         external_chapter_id=payload.get("external_chapter_id"),
         branch_id=payload.get("branch_id"),
@@ -619,11 +619,7 @@ def _inventory_page(
     title: RanobeLibTitleUrl, inventory: ChapterInventory, title_detail: TitleDetailMetadata
 ) -> str:
     branch_cards = _branch_cards(title, inventory, title_detail)
-    warning_items = "\n".join(
-        f"<li>{escape(warning.message)}"
-        f" (logical: {escape(str(warning.logical_id))}, variant: {escape(str(warning.variant_id))})</li>"
-        for warning in inventory.warnings
-    ) or "<li>No warnings</li>"
+    warnings_card = _warnings_card(inventory)
     cover_html = _title_cover_html(title_detail)
     title_pills = _title_pills(title_detail, inventory)
     return f"""
@@ -631,7 +627,7 @@ def _inventory_page(
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>Build EPUB</title>
+  <title>Собрать EPUB</title>
   <style>
     :root {{ color-scheme: light; }}
     body{{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:1180px;margin:32px auto;padding:0 16px;line-height:1.45;background:#f7f7fb;color:#1f2937}}
@@ -655,33 +651,31 @@ def _inventory_page(
     </section>
 
     <section class="card" aria-labelledby="settings-title">
-      <h2 id="settings-title">Build settings</h2>
-      <p class="muted">These EPUB metadata fields are copied into the branch build you submit. Current synchronous build limit: {MAX_SYNC_BUILD_VARIANTS} chapter variants per EPUB build; the server enforces this limit authoritatively.</p>
+      <h2 id="settings-title">Настройки сборки</h2>
+      <p class="muted">Эти поля метаданных EPUB будут добавлены в выбранную сборку. Текущий лимит синхронной сборки: {MAX_SYNC_BUILD_VARIANTS} вариантов глав на один EPUB; сервер проверяет этот лимит.</p>
       <div class="settings-grid" id="build-settings">
-        <label>Book title <input data-build-setting name="book_title" value="{escape(title_detail.display_title, quote=True)}" required></label>
-        <label>Author <input data-build-setting name="author" value="{escape(title_detail.author, quote=True)}"></label>
+        <label>Название книги <input data-build-setting name="book_title" value="{escape(title_detail.display_title, quote=True)}" required></label>
+        <label>Автор <input data-build-setting name="author" value="{escape(title_detail.author, quote=True)}"></label>
         <input data-build-setting type="hidden" name="language" value="ru">
         <input data-build-setting type="hidden" name="translator" value="">
         <input data-build-setting type="hidden" name="team" value="">
-        <label><input data-build-setting type="checkbox" name="include_images" value="true" checked> Include images</label>
+        <label><input data-build-setting type="checkbox" name="include_images" value="true" checked> Включить иллюстрации</label>
       </div>
-      <p class="muted">Images can make the build slower and the EPUB larger. They are fetched read-only during this build only, bounded by limits, not cached/stored.</p>
-      <p class="muted">For larger titles, use branch/range filters or split the title into multiple EPUB files.</p>
+      <p class="muted">Иллюстрации могут замедлить сборку и увеличить размер EPUB. Они загружаются только для этой сборки в read-only режиме, с лимитами, без кеширования и хранения.</p>
+      <p class="muted">Для больших тайтлов используйте фильтры ветки/диапазона или разделите тайтл на несколько EPUB-файлов.</p>
     </section>
 
     <section class="branches" aria-labelledby="branches-title">
-      <h2 id="branches-title">Branch cards</h2>
+      <h2 id="branches-title">Ветки перевода</h2>
       {branch_cards}
     </section>
 
-    <section class="card">
-      <h2>Warnings</h2>
-      <ul>{warning_items}</ul>
-    </section>
+    {warnings_card}
   </main>
   <script>
   (() => {{
     const settings = [...document.querySelectorAll('[data-build-setting]')];
+    const busyMessage = 'Сервис сейчас занят. Попробуйте чуть позже.';
     const filenameFromDisposition = (header) => {{
       const fallback = 'ranobelib-title.epub';
       if (!header) return fallback;
@@ -702,16 +696,16 @@ def _inventory_page(
       const statusCounts = form.querySelector('[data-build-status-counts]');
       while (true) {{
         const response = await fetch(`/build-jobs/${{encodeURIComponent(jobId)}}`, {{headers: {{'Accept': 'application/json'}}}});
-        const payload = await response.json().catch(() => ({{message: 'Could not read build status.'}}));
-        if (!response.ok) throw new Error(payload.message || 'Build status failed.');
-        if (statusText) statusText.textContent = payload.message || payload.status || 'Building EPUB…';
+        const payload = await response.json().catch(() => ({{message: 'Не удалось прочитать статус сборки.'}}));
+        if (!response.ok) throw new Error(payload.message || 'Не удалось получить статус сборки.');
+        if (statusText) statusText.textContent = payload.message || payload.status || 'Собираю EPUB…';
         const bits = [];
-        if (payload.chapter_current !== undefined && payload.chapter_total !== undefined) bits.push(`Chapter ${{payload.chapter_current}} / ${{payload.chapter_total}}`);
-        if (payload.image_current !== undefined && payload.image_total !== undefined) bits.push(`Image ${{payload.image_current}} / ${{payload.image_total}}`);
-        else if (payload.image_current !== undefined) bits.push(`Images fetched: ${{payload.image_current}}`);
+        if (payload.chapter_current !== undefined && payload.chapter_total !== undefined) bits.push(`Глава ${{payload.chapter_current}} / ${{payload.chapter_total}}`);
+        if (payload.image_current !== undefined && payload.image_total !== undefined) bits.push(`Иллюстрация ${{payload.image_current}} / ${{payload.image_total}}`);
+        else if (payload.image_current !== undefined) bits.push(`Иллюстраций загружено: ${{payload.image_current}}`);
         if (statusCounts) statusCounts.textContent = bits.join(' · ');
         if (payload.status === 'ready') return payload.download_url || `/build-jobs/${{encodeURIComponent(jobId)}}/download`;
-        if (payload.status === 'failed') throw new Error(payload.error || payload.message || 'Build failed.');
+        if (payload.status === 'failed') throw new Error(payload.error || payload.message || 'Сборка не удалась.');
         await new Promise((resolve) => setTimeout(resolve, 1200));
       }}
     }};
@@ -736,24 +730,25 @@ def _inventory_page(
         form.classList.remove('is-complete', 'has-build-error');
         const readyLink = form.querySelector('[data-build-download-link]');
         if (readyLink) {{ readyLink.hidden = true; readyLink.removeAttribute('href'); }}
-        if (submitter) {{ submitter.disabled = true; submitter.textContent = 'Building EPUB…'; }}
+        if (submitter) {{ submitter.disabled = true; submitter.textContent = 'Собираю EPUB…'; }}
         form.classList.add('is-building');
         try {{
           const start = await fetch('/build-jobs', {{ method: 'POST', body, headers: {{'Accept': 'application/json'}} }});
-          const payload = await start.json().catch(() => ({{message: 'Could not start async build.'}}));
-          if (!start.ok || !payload.job_id) throw new Error(payload.message || 'Could not start async build.');
+          const payload = await start.json().catch(() => ({{message: 'Не удалось запустить сборку.'}}));
+          if (start.status === 429 || start.status === 409) throw new Error(payload.message || busyMessage);
+          if (!start.ok || !payload.job_id) throw new Error(payload.message || 'Не удалось запустить сборку.');
           const downloadUrl = await pollJob(payload.job_id, form);
           if (readyLink) {{ readyLink.href = downloadUrl; readyLink.hidden = false; }}
           const response = await fetch(downloadUrl, {{headers: {{'Accept': 'application/epub+zip'}}}});
           if (!response.ok) {{
-            const errorPayload = await response.json().catch(() => ({{message: 'Download failed.'}}));
-            throw new Error(errorPayload.message || 'Download failed.');
+            const errorPayload = await response.json().catch(() => ({{message: 'Не удалось скачать EPUB.'}}));
+            throw new Error(errorPayload.message || 'Не удалось скачать EPUB.');
           }}
           triggerDownload(await response.blob(), filenameFromDisposition(response.headers.get('content-disposition')));
           form.classList.add('is-complete');
         }} catch (error) {{
           const target = form.querySelector('[data-build-error-message]');
-          if (target) target.textContent = error.message || 'Build failed.';
+          if (target) target.textContent = error.message || 'Сборка не удалась.';
           form.classList.add('has-build-error');
         }} finally {{
           form.classList.remove('is-building');
@@ -773,29 +768,41 @@ def _inventory_page(
 """
 
 
+def _warnings_card(inventory: ChapterInventory) -> str:
+    if not inventory.warnings:
+        return ""
+    warning_items = "\n".join(
+        f"<li>{escape(warning.message)}"
+        f" (логическая глава: {escape(str(warning.logical_id))}, "
+        f"вариант: {escape(str(warning.variant_id))})</li>"
+        for warning in inventory.warnings
+    )
+    return f'<section class="card"><h2>Предупреждения</h2><ul>{warning_items}</ul></section>'
+
+
 def _title_cover_html(title_detail: TitleDetailMetadata) -> str:
     if not title_detail.cover_url:
         return ""
     return (
         f'<img class="title-cover" src="{escape(title_detail.cover_url, quote=True)}" '
-        f'alt="{escape(title_detail.display_title, quote=True)} cover">'
+        f'alt="Обложка: {escape(title_detail.display_title, quote=True)}">'
     )
 
 
 def _author_line(title_detail: TitleDetailMetadata) -> str:
     if not title_detail.author:
         return ""
-    return f'<p><strong>Author:</strong> {escape(title_detail.author)}</p>'
+    return f'<p><strong>Автор:</strong> {escape(title_detail.author)}</p>'
 
 
 def _title_pills(title_detail: TitleDetailMetadata, inventory: ChapterInventory) -> str:
-    pills = [f"Buildable chapters: {len(inventory.buildable_variants)}"]
+    pills = [f"Глав доступно: {len(inventory.buildable_variants)}"]
     if title_detail.uploaded_count is not None:
-        pills.append(f"Uploaded: {title_detail.uploaded_count}")
+        pills.append(f"Загружено: {title_detail.uploaded_count}")
     if title_detail.status_label:
-        pills.append(f"Status: {title_detail.status_label}")
+        pills.append(f"Статус: {title_detail.status_label}")
     if title_detail.type_label:
-        pills.append(f"Type: {title_detail.type_label}")
+        pills.append(f"Тип: {title_detail.type_label}")
     return '<div class="title-pills">' + "".join(
         f'<span class="pill">{escape(str(pill))}</span>' for pill in pills
     ) + "</div>"
@@ -808,7 +815,7 @@ def _branch_cards(
     for variant in inventory.buildable_variants:
         groups.setdefault(_branch_key(variant), []).append(variant)
     if not groups:
-        return '<article class="branch-card"><div class="branch-body"><p class="bad">No buildable variants available.</p></div></article>'
+        return '<article class="branch-card"><div class="branch-body"><p class="bad">Нет доступных для сборки вариантов.</p></div></article>'
     cards = []
     for branch_id, variants in groups.items():
         cards.append(_branch_card(title, branch_id, tuple(variants), inventory.variants, title_detail))
@@ -831,7 +838,7 @@ def _branch_card(
     )
     volumes = _volume_sections(variants)
     non_buildable = _non_buildable_for_branch(branch_id, all_variants)
-    range_hint = f"Volume {vol_min or 'min'}–{vol_max or 'max'}, chapter {ch_min or 'min'}–{ch_max or 'max'}"
+    range_hint = f"том {vol_min or 'мин.'}–{vol_max or 'макс.'}, глава {ch_min or 'мин.'}–{ch_max or 'макс.'}"
     return f"""
       <article class="branch-card">
         <form action="/build" method="post" data-branch-form data-branch-size="{len(variants)}">
@@ -847,43 +854,43 @@ def _branch_card(
           <header class="branch-header">
             <h3>{escape(label)}</h3>
             <div class="branch-meta">
-              <span class="pill">Branch ID: {escape(branch_id)}</span>
-              <span class="pill">Buildable chapters: {len(variants)}</span>
-              <span class="pill">Volume range: {escape(str(vol_min or '—'))}–{escape(str(vol_max or '—'))}</span>
-              <span class="pill">Chapter range: {escape(str(ch_min or '—'))}–{escape(str(ch_max or '—'))}</span>
+              <span class="pill">ID ветки: {escape(branch_id)}</span>
+              <span class="pill">Глав доступно: {len(variants)}</span>
+              <span class="pill">Диапазон томов: {escape(str(vol_min or '—'))}–{escape(str(vol_max or '—'))}</span>
+              <span class="pill">Диапазон глав: {escape(str(ch_min or '—'))}–{escape(str(ch_max or '—'))}</span>
             </div>
           </header>
           <div class="branch-body">
             <fieldset class="range">
-              <legend>Apply range inside this branch</legend>
-              <p class="muted">Range filters apply only to this branch card. Example context: {escape(range_hint)}.</p>
+              <legend>Выбрать диапазон внутри этой ветки</legend>
+              <p class="muted">Фильтры диапазона применяются только к этой ветке. Доступный диапазон: {escape(range_hint)}.</p>
               <div class="range-grid">
-                <label>Volume from <input name="volume_from" inputmode="decimal" placeholder="{escape(str(vol_min or 'from'), quote=True)}"></label>
-                <label>Volume to <input name="volume_to" inputmode="decimal" placeholder="{escape(str(vol_max or 'to'), quote=True)}"></label>
-                <label>Chapter from <input name="chapter_from" inputmode="decimal" placeholder="{escape(str(ch_min or 'from'), quote=True)}"></label>
-                <label>Chapter to <input name="chapter_to" inputmode="decimal" placeholder="{escape(str(ch_max or 'to'), quote=True)}"></label>
+                <label>Том от <input name="volume_from" inputmode="decimal" placeholder="{escape(str(vol_min or 'от'), quote=True)}"></label>
+                <label>Том до <input name="volume_to" inputmode="decimal" placeholder="{escape(str(vol_max or 'до'), quote=True)}"></label>
+                <label>Глава от <input name="chapter_from" inputmode="decimal" placeholder="{escape(str(ch_min or 'от'), quote=True)}"></label>
+                <label>Глава до <input name="chapter_to" inputmode="decimal" placeholder="{escape(str(ch_max or 'до'), quote=True)}"></label>
               </div>
             </fieldset>
             {volumes}
             {non_buildable}
             <div class="actions">
-              <button type="submit" name="selection_mode" value="range">Build this branch/range</button>
-              <button class="secondary" type="submit" name="selection_mode" value="checked">Build checked chapters</button>
-              <span class="muted"><span data-selected-count>0</span> checked; images on/off follows Build settings; sync limit {MAX_SYNC_BUILD_VARIANTS}.</span>
+              <button type="submit" name="selection_mode" value="range">Собрать эту ветку/диапазон</button>
+              <button class="secondary" type="submit" name="selection_mode" value="checked">Собрать отмеченные главы</button>
+              <span class="muted"><span data-selected-count>0</span> отмечено; иллюстрации берутся из настроек сборки; лимит синхронной сборки {MAX_SYNC_BUILD_VARIANTS}.</span>
             </div>
             <div class="progress-note" role="status" aria-live="polite" data-build-active-state>
               <div class="bar" aria-hidden="true"></div>
-              <p><strong>Building EPUB…</strong> <span data-build-status-message>Queued; waiting to start EPUB build.</span></p>
+              <p><strong>Собираю EPUB…</strong> <span data-build-status-message>Задача поставлена в очередь; ожидаю начала сборки EPUB.</span></p>
               <p data-build-status-counts class="muted"></p>
-              <p>Fetching selected chapters and optional images, then packaging EPUB. Keep this tab open.</p>
-              <p class="muted">Selected chapter count is shown above when JavaScript is available; this branch has {len(variants)} buildable chapters, images follow the toggle, sync limit {MAX_SYNC_BUILD_VARIANTS}.</p>
+              <p>Загружаю выбранные главы и иллюстрации, затем упаковываю EPUB. Не закрывайте эту вкладку.</p>
+              <p class="muted">Количество выбранных глав показано выше, если доступен JavaScript; в этой ветке {len(variants)} глав доступно, иллюстрации зависят от переключателя, лимит синхронной сборки {MAX_SYNC_BUILD_VARIANTS}.</p>
             </div>
             <div class="build-complete" role="status" aria-live="polite" data-build-complete-state>
-              <p><strong>Download ready / Download started.</strong> If the browser blocked the automatic download, submit this build again and use the downloaded file prompt.</p>
-              <p><a data-build-download-link hidden>Download EPUB</a></p>
+              <p><strong>Файл готов / скачивание началось.</strong> Если браузер заблокировал автоматическое скачивание, повторите сборку и сохраните файл через стандартный диалог загрузки.</p>
+              <p><a data-build-download-link hidden>Скачать EPUB</a></p>
             </div>
             <div class="build-error" role="alert" data-build-error-state>
-              <p><strong>Build failed.</strong> <span data-build-error-message>Please review the request and try again.</span></p>
+              <p><strong>Сборка не удалась.</strong> <span data-build-error-message>Проверьте параметры и попробуйте снова.</span></p>
             </div>
           </div>
         </form>
@@ -898,27 +905,27 @@ def _volume_sections(variants: tuple[ChapterBranchVariant, ...]) -> str:
     sections = []
     for volume, volume_variants in by_volume.items():
         rows = "\n".join(_chapter_row(variant) for variant in volume_variants)
-        sections.append(f'<section class="volume-group"><h4 class="volume-title">Volume {escape(volume)}</h4><table><thead><tr><th>Select</th><th>Volume</th><th>Chapter</th><th>Title</th></tr></thead><tbody>{rows}</tbody></table></section>')
+        sections.append(f'<section class="volume-group"><h4 class="volume-title">Том {escape(volume)}</h4><table><thead><tr><th>Выбор</th><th>Том</th><th>Глава</th><th>Название</th></tr></thead><tbody>{rows}</tbody></table></section>')
     return "\n".join(sections)
 
 
 def _chapter_row(variant: ChapterBranchVariant) -> str:
     value = escape(_variant_form_value(variant), quote=True)
-    return f'<tr><td><label><input type="checkbox" name="selected_variant" value="{value}"> Build</label></td><td>{escape(str(variant.volume))}</td><td>{escape(str(variant.number))}</td><td>{escape(variant.chapter_title or "—")}</td></tr>'
+    return f'<tr><td><label><input type="checkbox" name="selected_variant" value="{value}"> Собрать</label></td><td>{escape(str(variant.volume))}</td><td>{escape(str(variant.number))}</td><td>{escape(variant.chapter_title or "—")}</td></tr>'
 
 
 def _non_buildable_for_branch(branch_id: str, variants: tuple[ChapterBranchVariant, ...]) -> str:
     rows = [variant for variant in variants if not variant.is_buildable and (variant.branch_id is None or str(variant.branch_id) == branch_id)]
     if not rows:
         return ""
-    items = "\n".join(f'<li>{escape(variant.display_label)} <span class="bad">not selectable / non-buildable</span></li>' for variant in rows)
-    return f'<details><summary>Non-buildable variants visible separately</summary><ul>{items}</ul></details>'
+    items = "\n".join(f'<li>{escape(variant.display_label)} <span class="bad">нельзя выбрать / недоступно для сборки</span></li>' for variant in rows)
+    return f'<details><summary>Недоступные для сборки варианты показаны отдельно</summary><ul>{items}</ul></details>'
 
 
 def _branch_label(variant: ChapterBranchVariant) -> str:
     if variant.branch_team or variant.branch_user:
         return variant.branch_team or variant.branch_user or ""
-    return "Default branch" if variant.is_default_branch else f"Branch {variant.branch_id}"
+    return "Основная ветка" if variant.is_default_branch else f"Ветка {variant.branch_id}"
 
 
 def _branch_key(variant: ChapterBranchVariant) -> str:
@@ -944,7 +951,7 @@ def _branch_options(variants: tuple[ChapterBranchVariant, ...]) -> tuple[tuple[s
         if branch_id in seen:
             continue
         seen.add(branch_id)
-        name = variant.branch_team or variant.branch_user or f"Branch {branch_id}"
+        name = variant.branch_team or variant.branch_user or f"Ветка {branch_id}"
         options.append((branch_id, f"{name} ({branch_id})"))
     return tuple(options)
 
@@ -952,11 +959,11 @@ def _branch_options(variants: tuple[ChapterBranchVariant, ...]) -> tuple[tuple[s
 def _variant_selector(variant: ChapterBranchVariant) -> str:
     label = escape(variant.display_label)
     if not variant.is_buildable:
-        return f"{label} <span class=\"bad\" aria-label=\"not selectable\">not selectable</span>"
+        return f"{label} <span class=\"bad\" aria-label=\"нельзя выбрать\">нельзя выбрать</span>"
     value = escape(_variant_form_value(variant), quote=True)
     return (
         "<label>"
         f'<input type="checkbox" name="selected_variant" value="{value}"> '
-        f"{label}"
+        f"Собрать {label}"
         "</label>"
     )

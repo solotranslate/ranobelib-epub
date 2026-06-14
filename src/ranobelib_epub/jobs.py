@@ -95,14 +95,14 @@ class BuildJobManager:
             self.cleanup()
             if self._active_count_locked() >= self.max_active_jobs:
                 raise RuntimeError(
-                    "Another EPUB build is already running. Please wait for it to finish."
+                    "Сервис сейчас занят. Попробуйте чуть позже."
                 )
             now = self._clock()
             job_id = uuid.uuid4().hex
             self._jobs[job_id] = BuildJobSnapshot(
                 job_id=job_id,
                 status="queued",
-                message="Queued; waiting to start EPUB build.",
+                message="Задача поставлена в очередь; ожидаю начала сборки EPUB.",
                 created_at=now,
                 updated_at=now,
                 filename=request.filename,
@@ -140,7 +140,7 @@ class BuildJobManager:
             self.update(job_id, status=status, **updates)
 
         try:
-            progress("starting", message="Starting EPUB build.")
+            progress("starting", message="Начинаю сборку EPUB.")
             epub_bytes = service.build(
                 request.title,
                 request.metadata,
@@ -151,15 +151,15 @@ class BuildJobManager:
             self.update(
                 job_id,
                 status="ready",
-                message="EPUB is ready to download.",
+                message="EPUB готов к скачиванию.",
                 epub_bytes=epub_bytes,
             )
         except Exception as exc:  # noqa: BLE001 - background job must return controlled status.
             self.update(
                 job_id,
                 status="failed",
-                message="EPUB build failed.",
-                error=str(exc) or "Build failed.",
+                message="Сборка EPUB не удалась.",
+                error=str(exc) or "Сборка не удалась.",
             )
 
     def update(self, job_id: str, *, status: JobStatus, **updates: object) -> None:
