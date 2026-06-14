@@ -14,6 +14,7 @@ from ranobelib_epub.inventory import (
     ChapterInventory,
     InventoryWarning,
     LogicalChapter,
+    parse_chapter_inventory,
 )
 from ranobelib_epub.ranobelib import RanobeLibTitleUrl
 
@@ -63,6 +64,25 @@ class FakeInventoryService:
             ),
             variants=(buildable, blocked),
             warnings=(InventoryWarning("Chapter branch variant is not buildable", 2, 102),),
+        )
+
+
+class FakeRowLevelBranchInventoryService:
+    def fetch(self, title: RanobeLibTitleUrl) -> ChapterInventory:
+        return parse_chapter_inventory(
+            title.slug,
+            {
+                "data": [
+                    {
+                        "id": 100,
+                        "branch_id": 55,
+                        "volume": "1",
+                        "number": "2",
+                        "name": "Row branch",
+                        "teams": [{"name": "Team A"}],
+                    }
+                ]
+            },
         )
 
 
@@ -538,6 +558,28 @@ def test_inventory_preview_renders_branch_card_range_controls() -> None:
     assert 'name="volume_to"' in response.text
     assert 'name="chapter_from"' in response.text
     assert 'name="chapter_to"' in response.text
+
+
+def test_inventory_preview_renders_row_level_branch_id_variant() -> None:
+    service = FakeRowLevelBranchInventoryService()
+    app.dependency_overrides[get_inventory_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/inventory", params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"}
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "No buildable variants available." not in response.text
+    assert "Branch ID: 55" in response.text
+    assert "Buildable chapters: 1" in response.text
+    assert "Row branch" in response.text
+    assert "Team A" in response.text
+    assert 'name="selected_variant"' in response.text
+    assert response.text.count('<input type="checkbox" name="selected_variant"') == 1
 
 
 def test_build_route_accepts_bulk_payload_when_no_manual_checkbox_selected() -> None:
