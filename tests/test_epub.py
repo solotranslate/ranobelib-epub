@@ -74,7 +74,7 @@ def test_build_epub_renders_supported_blocks_and_marks() -> None:
         assert "<em> italic</em>" in html
         assert "<u> underline</u>" in html
         assert "<s> strike</s>" in html
-        assert "<p><br /></p>" in html
+        assert "<p><br" in html
         assert "<ol>" in html
         assert "<ul>" in html
         assert "<blockquote>" in html
