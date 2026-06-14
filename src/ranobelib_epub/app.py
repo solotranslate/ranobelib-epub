@@ -685,7 +685,7 @@ def _inventory_page(
     const filenameFromDisposition = (header) => {{
       const fallback = 'ranobelib-title.epub';
       if (!header) return fallback;
-      const utf8 = header.match(/filename\*=UTF-8''([^;]+)/i);
+      const utf8 = header.match(/filename\\*=UTF-8''([^;]+)/i);
       if (utf8) return decodeURIComponent(utf8[1]).replace(/[\\/]/g, '_') || fallback;
       const ascii = header.match(/filename="?([^";]+)"?/i);
       return ascii ? ascii[1].replace(/[\\/]/g, '_') : fallback;

@@ -57,6 +57,8 @@ def test_concurrency_guard_rejects_second_active_job() -> None:
                 branch_id=None,
                 volume="1",
                 number="1",
+                number_secondary=None,
+                chapter_title=None,
                 is_default_branch=True,
             ),
         ),

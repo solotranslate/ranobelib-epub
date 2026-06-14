@@ -262,7 +262,12 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert 'data-build-complete-state' in response.text
     assert "Download ready / Download started." in response.text
     assert 'data-build-error-state' in response.text
-    assert "fetch(form.action" in response.text
+    assert "fetch('/build-jobs'" in response.text
+    assert "pollJob" in response.text
+    assert "/build-jobs/${encodeURIComponent(jobId)}" in response.text
+    assert "data-build-status-message" in response.text
+    assert "data-build-status-counts" in response.text
+    assert "data-build-download-link" in response.text
     assert (
         "const body = submitter ? new FormData(form, submitter) : new FormData(form);"
         in response.text
