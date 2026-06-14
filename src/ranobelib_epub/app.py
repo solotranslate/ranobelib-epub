@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, Response
 
 from ranobelib_epub.build import build_selected_chapter_epub
 from ranobelib_epub.epub import BookMetadata
+from ranobelib_epub.images import HttpxImageAssetFetcher, ImageFetchLimits
 from ranobelib_epub.inventory import ChapterInventory, fetch_chapter_inventory
 from ranobelib_epub.inventory import ChapterBranchVariant, HttpxInventoryTransport
 from ranobelib_epub.ranobelib import RanobeLibTitleUrl, parse_title_url
@@ -42,6 +43,8 @@ class BuildService(Protocol):
         title: RanobeLibTitleUrl,
         metadata: BookMetadata,
         variants: tuple[ChapterBranchVariant, ...],
+        *,
+        include_images: bool = False,
     ) -> bytes: ...
 
 
@@ -54,12 +57,16 @@ class RanobeLibBuildService:
         title: RanobeLibTitleUrl,
         metadata: BookMetadata,
         variants: tuple[ChapterBranchVariant, ...],
+        *,
+        include_images: bool = False,
     ) -> bytes:
         result = build_selected_chapter_epub(
             title.slug,
             metadata,
             variants,
             self._transport,
+            image_fetcher=HttpxImageAssetFetcher() if include_images else None,
+            image_limits=ImageFetchLimits() if include_images else None,
         )
         return result.epub_bytes
 
@@ -168,6 +175,7 @@ def build_epub_download(
     volume_to: Annotated[str | None, Form()] = None,
     chapter_from: Annotated[str | None, Form()] = None,
     chapter_to: Annotated[str | None, Form()] = None,
+    include_images: Annotated[bool, Form()] = False,
     service: BuildService = Depends(get_build_service),
 ) -> Response:
     try:
@@ -193,7 +201,7 @@ def build_epub_download(
         return _error_page(str(exc), status_code=400)
 
     try:
-        epub_bytes = service.build(title, metadata, variants)
+        epub_bytes = service.build(title, metadata, variants, include_images=include_images)
     except ValueError as exc:
         return _error_page(str(exc), status_code=400)
 
@@ -520,6 +528,14 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
         <input id="team" name="team" placeholder="optional">
         <label for="language">Language</label>
         <input id="language" name="language" value="ru" required>
+      </fieldset>
+      <fieldset>
+        <legend>Images / Assets</legend>
+        <label>
+          <input type="checkbox" name="include_images" value="true">
+          Include images
+        </label>
+        <p class="muted">Images are fetched read-only during this build only, bounded by limits, not cached/stored.</p>
       </fieldset>
       {bulk_values}
       {bulk_controls}
