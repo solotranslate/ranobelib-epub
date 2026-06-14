@@ -122,7 +122,7 @@ def collect_image_assets(
         if progress_callback is not None:
             progress_callback(
                 "fetching_images",
-                message=f"Fetching image {image_current} of {image_total}",
+                message=f"Загружаю иллюстрацию {image_current} из {image_total}",
                 image_current=image_current,
                 image_total=image_total,
             )

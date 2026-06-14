@@ -2,6 +2,7 @@ import json
 
 from fastapi.testclient import TestClient
 
+import ranobelib_epub.app as app_module
 from ranobelib_epub.app import (
     MAX_SYNC_BUILD_VARIANTS,
     app,
@@ -17,6 +18,7 @@ from ranobelib_epub.inventory import (
     LogicalChapter,
     parse_chapter_inventory,
 )
+from ranobelib_epub.jobs import BuildJobSnapshot
 from ranobelib_epub.ranobelib import RanobeLibTitleUrl
 from ranobelib_epub.title_detail import TitleDetailMetadata
 
@@ -193,7 +195,8 @@ def test_index() -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "RanobeLib EPUB Builder" in response.text
+    assert "Сборщик EPUB для RanobeLib" in response.text
+    assert "Показать список глав" in response.text
     assert 'name="title_url"' in response.text
     assert 'action="/inventory"' in response.text
     assert "/book/" in response.text
@@ -220,18 +223,20 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert "Inventory preview" not in response.text
     assert "Русское название" in response.text
     assert "Автор Один" in response.text
-    assert '<img class="title-cover" src="https://img.example.test/cover.jpg" alt="Русское название cover">' in response.text
-    assert "Buildable chapters: 1" in response.text
-    assert "Uploaded: 12" in response.text
-    assert "Status: Онгоинг" in response.text
-    assert "Type: Япония" in response.text
-    assert "Branch cards" in response.text
+    assert 'class="title-cover"' in response.text
+    assert 'src="https://img.example.test/cover.jpg"' in response.text
+    assert 'alt="Обложка: Русское название"' in response.text
+    assert "Глав доступно: 1" in response.text
+    assert "Загружено: 12" in response.text
+    assert "Статус: Онгоинг" in response.text
+    assert "Тип: Япония" in response.text
+    assert "Ветки перевода" in response.text
     assert "Team A" in response.text
-    assert "Branch ID: 55" in response.text
-    assert "Buildable chapters: 1" in response.text
-    assert "Volume range: 1–1" in response.text
-    assert "Chapter range: 2–2" in response.text
-    assert "Volume 1" in response.text
+    assert "ID ветки: 55" in response.text
+    assert "Глав доступно: 1" in response.text
+    assert "Диапазон томов: 1–1" in response.text
+    assert "Диапазон глав: 2–2" in response.text
+    assert "Том 1" in response.text
     assert "Two roads" in response.text
     assert 'action="/build"' in response.text
     assert 'method="post"' in response.text
@@ -243,24 +248,24 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert '<label>Team' not in response.text
     assert '<label>Language' not in response.text
     assert 'type="hidden" name="language" value="ru"' in response.text
-    assert "Build settings" in response.text
+    assert "Настройки сборки" in response.text
     assert 'name="include_images"' in response.text
     assert 'name="include_images" value="true" checked' in response.text
-    assert "Images can make the build slower and the EPUB larger." in response.text
+    assert "Иллюстрации могут замедлить сборку и увеличить размер EPUB." in response.text
     assert 'name="selected_variant"' in response.text
     assert response.text.count('<input type="checkbox" name="selected_variant"') == 1
-    assert "non-buildable" in response.text
-    assert "not selectable" in response.text
+    assert "недоступно для сборки" in response.text
+    assert "нельзя выбрать" in response.text
     assert "Chapter branch variant is not buildable" in response.text
-    assert f"Current synchronous build limit: {MAX_SYNC_BUILD_VARIANTS}" in response.text
-    assert "Apply range inside this branch" in response.text
-    assert "Build this branch/range" in response.text
-    assert "Build checked chapters" in response.text
-    assert "Building EPUB…" in response.text
-    assert "Fetching selected chapters and optional images, then packaging EPUB. Keep this tab open." in response.text
+    assert f"Текущий лимит синхронной сборки: {MAX_SYNC_BUILD_VARIANTS}" in response.text
+    assert "Выбрать диапазон внутри этой ветки" in response.text
+    assert "Собрать эту ветку/диапазон" in response.text
+    assert "Собрать отмеченные главы" in response.text
+    assert "Собираю EPUB…" in response.text
+    assert "Загружаю выбранные главы и иллюстрации, затем упаковываю EPUB. Не закрывайте эту вкладку." in response.text
     assert 'data-build-active-state' in response.text
     assert 'data-build-complete-state' in response.text
-    assert "Download ready / Download started." in response.text
+    assert "Файл готов / скачивание началось." in response.text
     assert 'data-build-error-state' in response.text
     assert "fetch('/build-jobs'" in response.text
     assert "pollJob" in response.text
@@ -273,9 +278,64 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
         in response.text
     )
     assert "triggerDownload" in response.text
-    assert "use branch/range filters or split the title into multiple EPUB files" in response.text
+    assert "используйте фильтры ветки/диапазона или разделите тайтл на несколько EPUB-файлов" in response.text
     assert "background worker" not in response.text.lower()
     assert "progress polling" not in response.text.lower()
+    assert "Предупреждения" in response.text
+    assert "No warnings" not in response.text
+    assert "Сервис сейчас занят. Попробуйте чуть позже." in response.text
+    assert "start.status === 429 || start.status === 409" in response.text
+    assert "target.textContent = error.message || 'Сборка не удалась.'" in response.text
+    assert "form.classList.remove('is-building')" in response.text
+    assert "submitter.disabled = false" in response.text
+
+
+def test_inventory_preview_omits_warnings_card_when_clean() -> None:
+    service = FakeRowLevelBranchInventoryService()
+    app.dependency_overrides[get_inventory_service] = lambda: service
+    app.dependency_overrides[get_title_detail_service] = lambda: FakeTitleDetailService()
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/inventory", params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"}
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "Предупреждения" not in response.text
+    assert "Warnings" not in response.text
+    assert "No warnings" not in response.text
+
+
+def test_build_jobs_busy_response_is_controlled_russian_message() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+    app_module.BUILD_JOBS._jobs["active"] = BuildJobSnapshot(
+        job_id="active",
+        status="fetching_chapters",
+        message="Загружаю главу 1 из 1",
+        created_at=app_module.BUILD_JOBS._clock(),
+        updated_at=app_module.BUILD_JOBS._clock(),
+    )
+
+    try:
+        response = client.post(
+            "/build-jobs",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": _variant_payload(),
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+        app_module.BUILD_JOBS._jobs.pop("active", None)
+
+    assert response.status_code == 429
+    assert response.json() == {"message": "Сервис сейчас занят. Попробуйте чуть позже."}
+    assert service.calls == []
 
 
 def test_inventory_preview_accepts_manga_url_with_fake_service_without_network() -> None:
@@ -434,7 +494,7 @@ def test_build_route_rejects_blank_title_before_build_service() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert "Book title must not be blank" in response.text
+    assert "Название книги не должно быть пустым" in response.text
     assert "Traceback" not in response.text
     assert service.calls == []
 
@@ -458,7 +518,7 @@ def test_build_route_rejects_malformed_language_before_build_service() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert "Language must be a valid language tag" in response.text
+    assert "Язык должен быть корректным языковым тегом" in response.text
     assert "Traceback" not in response.text
     assert service.calls == []
 
@@ -527,7 +587,7 @@ def test_build_route_rejects_empty_selection_before_build_service() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert "Select at least one buildable chapter variant" in response.text
+    assert "Выберите хотя бы одну доступную для сборки главу" in response.text
     assert "Traceback" not in response.text
     assert service.calls == []
 
@@ -549,7 +609,7 @@ def test_build_route_rejects_malformed_selection_before_build_service() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert "Selected variant at position 1 is malformed" in response.text
+    assert "Выбранная глава на позиции 1 содержит некорректные данные" in response.text
     assert "Traceback" not in response.text
     assert service.calls == []
 
@@ -571,7 +631,7 @@ def test_build_route_rejects_non_buildable_selection_before_build_service() -> N
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert "Selected variant at position 1 is not buildable" in response.text
+    assert "Выбранная глава на позиции 1 недоступна для сборки" in response.text
     assert "Traceback" not in response.text
     assert service.calls == []
 
@@ -612,13 +672,13 @@ def test_inventory_preview_renders_branch_card_range_controls() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert "Apply range inside this branch" in response.text
+    assert "Выбрать диапазон внутри этой ветки" in response.text
     assert 'name="bulk_variant"' in response.text
     assert response.text.count('name="bulk_variant"') == 1
     assert 'name="bulk_branch_id"' in response.text
     assert 'value="55"' in response.text
     assert "Team A" in response.text
-    assert "Branch ID: 55" in response.text
+    assert "ID ветки: 55" in response.text
     assert 'name="volume_from"' in response.text
     assert 'name="volume_to"' in response.text
     assert 'name="chapter_from"' in response.text
@@ -639,9 +699,9 @@ def test_inventory_preview_renders_row_level_branch_id_variant() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert "No buildable variants available." not in response.text
-    assert "Branch ID: 55" in response.text
-    assert "Buildable chapters: 1" in response.text
+    assert "Нет доступных для сборки вариантов." not in response.text
+    assert "ID ветки: 55" in response.text
+    assert "Глав доступно: 1" in response.text
     assert "Row branch" in response.text
     assert "Team A" in response.text
     assert 'name="selected_variant"' in response.text
@@ -662,9 +722,9 @@ def test_inventory_preview_renders_default_branch_variant() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert "No buildable variants available." not in response.text
-    assert "Branch ID: default" in response.text
-    assert "Buildable chapters: 1" in response.text
+    assert "Нет доступных для сборки вариантов." not in response.text
+    assert "ID ветки: default" in response.text
+    assert "Глав доступно: 1" in response.text
     assert "solotranslating" in response.text
     assert 'name="selected_variant"' in response.text
     assert "&quot;is_default_branch&quot;:true" in response.text
@@ -748,7 +808,7 @@ def test_build_route_checked_mode_rejects_empty_selection_before_build_service()
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert "Select at least one checked chapter variant" in response.text
+    assert "Отметьте хотя бы одну главу для сборки" in response.text
     assert "Traceback" not in response.text
     assert service.calls == []
 
@@ -854,7 +914,7 @@ def test_build_route_rejects_bulk_no_match_before_build_service() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert "Bulk selection did not match any buildable chapter variants" in response.text
+    assert "Выбранный диапазон не содержит доступных для сборки глав" in response.text
     assert service.calls == []
 
 
@@ -875,7 +935,7 @@ def test_build_route_rejects_malformed_bulk_payload_before_build_service() -> No
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert "Bulk variant at position 1 is malformed" in response.text
+    assert "Глава из диапазона на позиции 1 содержит некорректные данные" in response.text
     assert service.calls == []
 
 
@@ -903,8 +963,9 @@ def test_build_route_rejects_manual_selection_over_sync_limit_before_build_servi
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert f"contains {MAX_SYNC_BUILD_VARIANTS + 1} chapter variants" in response.text
-    assert f"configured maximum is {MAX_SYNC_BUILD_VARIANTS}" in response.text
+    assert str(MAX_SYNC_BUILD_VARIANTS + 1) in response.text
+    assert f"настроенный максимум — {MAX_SYNC_BUILD_VARIANTS}" in response.text
+    assert "разделите большой тайтл на несколько EPUB" in response.text
     assert service.calls == []
 
 
@@ -925,8 +986,9 @@ def test_build_route_rejects_bulk_selection_over_sync_limit_before_build_service
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert f"contains {MAX_SYNC_BUILD_VARIANTS + 1} chapter variants" in response.text
-    assert f"configured maximum is {MAX_SYNC_BUILD_VARIANTS}" in response.text
+    assert str(MAX_SYNC_BUILD_VARIANTS + 1) in response.text
+    assert f"настроенный максимум — {MAX_SYNC_BUILD_VARIANTS}" in response.text
+    assert "разделите большой тайтл на несколько EPUB" in response.text
     assert service.calls == []
 
 

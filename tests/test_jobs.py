@@ -76,6 +76,6 @@ def test_concurrency_guard_rejects_second_active_job() -> None:
     try:
         manager.start(request, service=object())  # type: ignore[arg-type]
     except RuntimeError as exc:
-        assert "already running" in str(exc)
+        assert "Сервис сейчас занят. Попробуйте чуть позже." in str(exc)
     else:
         raise AssertionError("Expected concurrency guard to reject active job")
