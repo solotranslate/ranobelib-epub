@@ -3,6 +3,7 @@ import json
 from fastapi.testclient import TestClient
 
 from ranobelib_epub.app import app, get_build_service, get_inventory_service
+from ranobelib_epub.epub import BookMetadata
 from ranobelib_epub.inventory import (
     ChapterBranchVariant,
     ChapterInventory,
@@ -62,10 +63,17 @@ class FakeInventoryService:
 
 class FakeBuildService:
     def __init__(self) -> None:
-        self.calls: list[tuple[RanobeLibTitleUrl, tuple[ChapterBranchVariant, ...]]] = []
+        self.calls: list[
+            tuple[RanobeLibTitleUrl, BookMetadata, tuple[ChapterBranchVariant, ...]]
+        ] = []
 
-    def build(self, title: RanobeLibTitleUrl, variants: tuple[ChapterBranchVariant, ...]) -> bytes:
-        self.calls.append((title, variants))
+    def build(
+        self,
+        title: RanobeLibTitleUrl,
+        metadata: BookMetadata,
+        variants: tuple[ChapterBranchVariant, ...],
+    ) -> bytes:
+        self.calls.append((title, metadata, variants))
         return b"fake epub bytes"
 
 
@@ -135,6 +143,13 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert 'action="/build"' in response.text
     assert 'method="post"' in response.text
     assert 'name="title_url"' in response.text
+    assert 'name="book_title"' in response.text
+    assert 'value="demo-title"' in response.text
+    assert 'name="author"' in response.text
+    assert 'name="translator"' in response.text
+    assert 'name="team"' in response.text
+    assert 'name="language"' in response.text
+    assert 'value="ru"' in response.text
     assert 'name="selected_variant"' in response.text
     assert response.text.count('name="selected_variant"') == 1
     assert "non-buildable" in response.text
@@ -169,6 +184,11 @@ def test_build_route_returns_epub_download_from_fake_service() -> None:
             data={
                 "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
                 "selected_variant": _variant_payload(),
+                "book_title": "Custom Book",
+                "author": "Author One",
+                "translator": "Translator One",
+                "team": "Team One",
+                "language": "ru",
             },
         )
     finally:
@@ -179,8 +199,16 @@ def test_build_route_returns_epub_download_from_fake_service() -> None:
     assert response.headers["content-disposition"] == 'attachment; filename="demo-title.epub"'
     assert response.content == b"fake epub bytes"
     assert len(service.calls) == 1
-    title, variants = service.calls[0]
+    title, metadata, variants = service.calls[0]
     assert title == RanobeLibTitleUrl(title_id=12345, slug="demo-title", locale="ru")
+    assert metadata == BookMetadata(
+        title="Custom Book",
+        author="Author One",
+        translator="Translator One",
+        team="Team One",
+        language="ru",
+        identifier="https://ranobelib.me/ru/book/12345--demo-title",
+    )
     assert variants[0].branch_id == 55
 
 
@@ -204,9 +232,107 @@ def test_build_route_preserves_selected_order() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    _, variants = service.calls[0]
+    _, _, variants = service.calls[0]
     assert [variant.external_chapter_id for variant in variants] == [101, 102]
     assert [variant.number for variant in variants] == ["1", "2"]
+
+
+def test_build_route_rejects_blank_title_before_build_service() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": _variant_payload(),
+                "book_title": "   ",
+                "language": "ru",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert "Book title must not be blank" in response.text
+    assert "Traceback" not in response.text
+    assert service.calls == []
+
+
+def test_build_route_rejects_malformed_language_before_build_service() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": _variant_payload(),
+                "book_title": "Demo",
+                "language": "ru_123",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert "Language must be a valid language tag" in response.text
+    assert "Traceback" not in response.text
+    assert service.calls == []
+
+
+def test_build_route_normalizes_blank_optional_metadata_fields_to_none() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": _variant_payload(),
+                "book_title": "Demo",
+                "author": " ",
+                "translator": "",
+                "team": " ",
+                "language": "ru",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    _, metadata, _ = service.calls[0]
+    assert metadata.author is None
+    assert metadata.translator is None
+    assert metadata.team is None
+
+
+def test_build_filename_remains_slug_based_with_free_form_title() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": _variant_payload(),
+                "book_title": "Название?! / free form",
+                "language": "ru",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == 'attachment; filename="demo-title.epub"'
 
 
 def test_build_route_rejects_empty_selection_before_build_service() -> None:
@@ -341,7 +467,7 @@ def test_build_route_accepts_bulk_payload_when_no_manual_checkbox_selected() -> 
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    _, variants = service.calls[0]
+    _, _, variants = service.calls[0]
     assert [variant.external_chapter_id for variant in variants] == [102]
 
 
@@ -366,7 +492,7 @@ def test_build_route_dedupes_bulk_payload_deterministically() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    _, variants = service.calls[0]
+    _, _, variants = service.calls[0]
     assert [variant.external_chapter_id for variant in variants] == [101, 102]
 
 
