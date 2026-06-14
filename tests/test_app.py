@@ -291,3 +291,123 @@ def test_build_route_rejects_invalid_title_url_without_stack_trace() -> None:
     assert "RanobeLib URL host must be ranobelib.me" in response.text
     assert "Traceback" not in response.text
     assert service.calls == []
+
+
+def test_inventory_preview_renders_bulk_branch_and_range_controls() -> None:
+    service = FakeInventoryService()
+    app.dependency_overrides[get_inventory_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/inventory", params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"}
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "Bulk selection controls" in response.text
+    assert 'name="bulk_variant"' in response.text
+    assert response.text.count('name="bulk_variant"') == 1
+    assert 'name="bulk_branch_id"' in response.text
+    assert "Team A (55)" in response.text
+    assert 'name="volume_from"' in response.text
+    assert 'name="volume_to"' in response.text
+    assert 'name="chapter_from"' in response.text
+    assert 'name="chapter_to"' in response.text
+
+
+def test_build_route_accepts_bulk_payload_when_no_manual_checkbox_selected() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "bulk_variant": [
+                    _variant_payload(external_chapter_id=101, branch_id=55, number="1"),
+                    _variant_payload(external_chapter_id=102, branch_id=55, number="2"),
+                    _variant_payload(external_chapter_id=103, branch_id=66, number="2"),
+                ],
+                "bulk_branch_id": "55",
+                "chapter_from": "2",
+                "chapter_to": "2",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    _, variants = service.calls[0]
+    assert [variant.external_chapter_id for variant in variants] == [102]
+
+
+def test_build_route_dedupes_bulk_payload_deterministically() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "bulk_variant": [
+                    _variant_payload(external_chapter_id=101, branch_id=55, number="1"),
+                    _variant_payload(external_chapter_id=101, branch_id=55, number="1"),
+                    _variant_payload(external_chapter_id=102, branch_id=55, number="2"),
+                ],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    _, variants = service.calls[0]
+    assert [variant.external_chapter_id for variant in variants] == [101, 102]
+
+
+def test_build_route_rejects_bulk_no_match_before_build_service() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "bulk_variant": _variant_payload(),
+                "bulk_branch_id": "999",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert "Bulk selection did not match any buildable chapter variants" in response.text
+    assert service.calls == []
+
+
+def test_build_route_rejects_malformed_bulk_payload_before_build_service() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "bulk_variant": "not json",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert "Bulk variant at position 1 is malformed" in response.text
+    assert service.calls == []
