@@ -236,7 +236,9 @@ def build_epub_download(
         return _error_page(str(exc), status_code=400)
 
     try:
-        epub_bytes = service.build(title, metadata, variants, include_images=include_images)
+        epub_bytes = service.build(
+            title, metadata, variants, include_images=include_images
+        )
     except ValueError as exc:
         return _error_page(str(exc), status_code=400)
 
@@ -421,7 +423,9 @@ def _selected_variants(
             raise ValueError("Выбранный диапазон не содержит доступных для сборки глав")
         selected = _dedupe_variants(variants)
     elif raw_variants:
-        selected = _dedupe_variants(_parse_variant_values(raw_variants, source="Выбранная глава"))
+        selected = _dedupe_variants(
+            _parse_variant_values(raw_variants, source="Выбранная глава")
+        )
     elif bulk_variants:
         candidates = _parse_variant_values(bulk_variants, source="Глава из диапазона")
         variants = _filter_bulk_variants(
@@ -453,15 +457,21 @@ def _enforce_sync_build_limit(variants: tuple[ChapterBranchVariant, ...]) -> Non
         )
 
 
-def _parse_variant_values(raw_variants: list[str], *, source: str) -> tuple[ChapterBranchVariant, ...]:
+def _parse_variant_values(
+    raw_variants: list[str], *, source: str
+) -> tuple[ChapterBranchVariant, ...]:
     variants: list[ChapterBranchVariant] = []
     for index, raw_variant in enumerate(raw_variants, start=1):
         try:
             payload = json.loads(raw_variant)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"{source} на позиции {index} содержит некорректные данные") from exc
+            raise ValueError(
+                f"{source} на позиции {index} содержит некорректные данные"
+            ) from exc
         if not isinstance(payload, dict):
-            raise ValueError(f"{source} на позиции {index} содержит некорректные данные")
+            raise ValueError(
+                f"{source} на позиции {index} содержит некорректные данные"
+            )
 
         variant = _variant_from_form_payload(payload, index, source=source)
         if not variant.is_buildable:
@@ -485,9 +495,13 @@ def _filter_bulk_variants(
     ch_min = _optional_number(chapter_from, "Глава от")
     ch_max = _optional_number(chapter_to, "Глава до")
     if vol_min is not None and vol_max is not None and vol_min > vol_max:
-        raise ValueError("Начало диапазона томов должно быть меньше или равно концу диапазона")
+        raise ValueError(
+            "Начало диапазона томов должно быть меньше или равно концу диапазона"
+        )
     if ch_min is not None and ch_max is not None and ch_min > ch_max:
-        raise ValueError("Начало диапазона глав должно быть меньше или равно концу диапазона")
+        raise ValueError(
+            "Начало диапазона глав должно быть меньше или равно концу диапазона"
+        )
 
     selected: list[ChapterBranchVariant] = []
     for variant in variants:
@@ -536,7 +550,9 @@ def _parse_number(value: str | None) -> float | None:
         return None
 
 
-def _dedupe_variants(variants: tuple[ChapterBranchVariant, ...]) -> tuple[ChapterBranchVariant, ...]:
+def _dedupe_variants(
+    variants: tuple[ChapterBranchVariant, ...],
+) -> tuple[ChapterBranchVariant, ...]:
     deduped: list[ChapterBranchVariant] = []
     seen: set[tuple[str, str, str, str]] = set()
     for variant in variants:
@@ -616,7 +632,9 @@ def _epub_filename(title: RanobeLibTitleUrl) -> str:
 
 
 def _inventory_page(
-    title: RanobeLibTitleUrl, inventory: ChapterInventory, title_detail: TitleDetailMetadata
+    title: RanobeLibTitleUrl,
+    inventory: ChapterInventory,
+    title_detail: TitleDetailMetadata,
 ) -> str:
     branch_cards = _branch_cards(title, inventory, title_detail)
     warnings_card = _warnings_card(inventory)
@@ -635,7 +653,7 @@ def _inventory_page(
     .title-card,.card{{padding:22px;margin-bottom:18px}} .title-card{{display:flex;gap:18px;align-items:flex-start}} .title-cover{{width:112px;max-width:30vw;border-radius:12px;border:1px solid #d9deea;object-fit:cover;background:#f8fafc}} .title-meta{{min-width:0}} .title-meta h1{{margin:.1rem 0 .4rem}} .title-meta p{{margin:.25rem 0}}
     .settings-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}} label{{display:block;font-weight:650}} input,select,button{{font:inherit;border-radius:10px;border:1px solid #bfc7d5;padding:9px 11px}} input[type="text"],input[type="url"],input:not([type]){{width:100%;box-sizing:border-box;margin-top:5px}} input[type="checkbox"]{{margin-right:8px}} button{{cursor:pointer;background:#243b63;color:#fff;border-color:#243b63;font-weight:700}} button.secondary{{background:#fff;color:#243b63}}
     .muted{{color:#64748b;font-size:.95rem}} .ok{{color:#176b32}} .bad{{color:#9f1d1d}} .branches{{display:grid;gap:18px}} .branch-card{{padding:0;overflow:hidden}} .branch-header{{padding:18px 20px;background:#eef4ff;border-bottom:1px solid #d9deea}} .branch-meta,.title-pills{{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}} .pill{{background:#fff;border:1px solid #cbd5e1;border-radius:999px;padding:4px 9px;font-size:.88rem}}
-    .branch-body{{padding:18px 20px}} .range{{border:1px dashed #b6c2d6;border-radius:14px;padding:14px;margin-bottom:16px;background:#fbfdff}} .range-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}} .volume-group{{margin:16px 0}} .volume-title{{font-size:1rem;margin:0 0 8px}} table{{border-collapse:collapse;width:100%;background:#fff}} td,th{{border:1px solid #e2e8f0;padding:8px;text-align:left;vertical-align:top}} th{{background:#f8fafc}} .actions{{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}} .progress-note,.build-complete,.build-error{{display:none;margin-top:12px;padding:12px;border-radius:12px;border:1px solid #bfdbfe}} .progress-note{{background:#eff6ff}} .build-complete{{background:#ecfdf5;border-color:#bbf7d0}} .build-error{{background:#fef2f2;border-color:#fecaca}} .is-building .progress-note,.is-complete .build-complete,.has-build-error .build-error{{display:block}} .is-building button[type="submit"]{{opacity:.7;cursor:wait}} .bar{{height:8px;border-radius:999px;background:linear-gradient(90deg,#93c5fd,#dbeafe,#93c5fd);background-size:200% 100%;animation:indeterminate 1.2s linear infinite}} @keyframes indeterminate{{from{{background-position:200% 0}}to{{background-position:-200% 0}}}}
+    .branch-body{{padding:18px 20px}} .range,.quick-actions,.manual-selection{{border:1px dashed #b6c2d6;border-radius:14px;padding:14px;margin-bottom:16px;background:#fbfdff}} .quick-actions{{background:#f8fbff}} .manual-selection{{background:#fff}} .range-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}} .range-message{{margin:.75rem 0 0;font-weight:650}} .range-message.bad{{color:#9f1d1d}} .range-message.ok{{color:#176b32}} button:disabled{{opacity:.55;cursor:not-allowed}} .volume-group{{margin:16px 0}} .volume-title{{font-size:1rem;margin:0 0 8px}} table{{border-collapse:collapse;width:100%;background:#fff}} td,th{{border:1px solid #e2e8f0;padding:8px;text-align:left;vertical-align:top}} th{{background:#f8fafc}} .actions{{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}} .progress-note,.build-complete,.build-error{{display:none;margin-top:12px;padding:12px;border-radius:12px;border:1px solid #bfdbfe}} .progress-note{{background:#eff6ff}} .build-complete{{background:#ecfdf5;border-color:#bbf7d0}} .build-error{{background:#fef2f2;border-color:#fecaca}} .is-building .progress-note,.is-complete .build-complete,.has-build-error .build-error{{display:block}} .is-building button[type="submit"]{{opacity:.7;cursor:wait}} .bar{{height:8px;border-radius:999px;background:linear-gradient(90deg,#93c5fd,#dbeafe,#93c5fd);background-size:200% 100%;animation:indeterminate 1.2s linear infinite}} @keyframes indeterminate{{from{{background-position:200% 0}}to{{background-position:-200% 0}}}}
   </style>
 </head>
 <body>
@@ -710,7 +728,63 @@ def _inventory_page(
       }}
     }};
     document.querySelectorAll('form[data-branch-form]').forEach((form) => {{
+      const maxBuild = Number(form.dataset.maxBuild || '100');
+      const parseNumber = (value) => {{
+        if (value === undefined || value === null || String(value).trim() === '') return null;
+        const parsed = Number(String(value).trim().replace(',', '.'));
+        return Number.isFinite(parsed) ? parsed : null;
+      }};
+      const inRange = (value, min, max) => {{
+        if (min === null && max === null) return true;
+        const parsed = parseNumber(value);
+        if (parsed === null) return false;
+        if (min !== null && parsed < min) return false;
+        if (max !== null && parsed > max) return false;
+        return true;
+      }};
+      const customFrom = form.querySelector('[data-custom-chapter-from]');
+      const customTo = form.querySelector('[data-custom-chapter-to]');
+      const customButton = form.querySelector('[data-custom-range-submit]');
+      const rangeMessage = form.querySelector('[data-range-message]');
+      const countRange = () => {{
+        const from = parseNumber(customFrom && customFrom.value);
+        const to = parseNumber(customTo && customTo.value);
+        if (from !== null && to !== null && from > to) return 0;
+        return [...form.querySelectorAll('input[name="bulk_variant"][data-bulk-variant]')]
+          .filter((node) => inRange(node.dataset.chapterNumber, from, to))
+          .filter((node) => inRange(node.dataset.volumeNumber, parseNumber(form.querySelector('[name="volume_from"]')?.value), parseNumber(form.querySelector('[name="volume_to"]')?.value)))
+          .length;
+      }};
+      const updateRange = () => {{
+        if (!rangeMessage || !customButton) return;
+        const count = countRange();
+        rangeMessage.classList.remove('ok', 'bad');
+        if (count === 0) {{
+          rangeMessage.textContent = 'В этом диапазоне нет доступных глав.';
+          rangeMessage.classList.add('bad');
+          customButton.disabled = true;
+        }} else if (count > maxBuild) {{
+          rangeMessage.textContent = `Выбрано ${{count}} глав — максимум ${{maxBuild}}. Разбейте диапазон на несколько EPUB.`;
+          rangeMessage.classList.add('bad');
+          customButton.disabled = true;
+        }} else {{
+          rangeMessage.textContent = `Будет собрано: ${{count}} глав`;
+          rangeMessage.classList.add('ok');
+          customButton.disabled = false;
+        }}
+      }};
+      [customFrom, customTo, form.querySelector('[name="volume_from"]'), form.querySelector('[name="volume_to"]')].forEach((node) => {{ if (node) node.addEventListener('input', updateRange); }});
+      updateRange();
       form.addEventListener('submit', async (event) => {{
+        form.querySelectorAll('[data-mirrored-setting],[data-quick-range-field]').forEach((node) => node.remove());
+        const quick = event.submitter && event.submitter.matches('[data-quick-range-submit]') ? event.submitter : null;
+        if (quick) {{
+          [['selection_mode', 'range'], ['chapter_from', quick.dataset.chapterFrom], ['chapter_to', quick.dataset.chapterTo], ['volume_from', quick.dataset.volumeFrom], ['volume_to', quick.dataset.volumeTo]].forEach(([name, value]) => {{
+            if (value === undefined || value === null || value === '') return;
+            const hidden = document.createElement('input');
+            hidden.type = 'hidden'; hidden.name = name; hidden.value = value; hidden.setAttribute('data-quick-range-field', 'true'); form.appendChild(hidden);
+          }});
+        }}
         form.querySelectorAll('[data-mirrored-setting]').forEach((node) => node.remove());
         const includeImages = document.querySelector('[data-build-setting][name="include_images"]');
         form.querySelectorAll('[data-default-include-images]').forEach((node) => {{
@@ -792,7 +866,7 @@ def _title_cover_html(title_detail: TitleDetailMetadata) -> str:
 def _author_line(title_detail: TitleDetailMetadata) -> str:
     if not title_detail.author:
         return ""
-    return f'<p><strong>Автор:</strong> {escape(title_detail.author)}</p>'
+    return f"<p><strong>Автор:</strong> {escape(title_detail.author)}</p>"
 
 
 def _title_pills(title_detail: TitleDetailMetadata, inventory: ChapterInventory) -> str:
@@ -803,13 +877,17 @@ def _title_pills(title_detail: TitleDetailMetadata, inventory: ChapterInventory)
         pills.append(f"Статус: {title_detail.status_label}")
     if title_detail.type_label:
         pills.append(f"Тип: {title_detail.type_label}")
-    return '<div class="title-pills">' + "".join(
-        f'<span class="pill">{escape(str(pill))}</span>' for pill in pills
-    ) + "</div>"
+    return (
+        '<div class="title-pills">'
+        + "".join(f'<span class="pill">{escape(str(pill))}</span>' for pill in pills)
+        + "</div>"
+    )
 
 
 def _branch_cards(
-    title: RanobeLibTitleUrl, inventory: ChapterInventory, title_detail: TitleDetailMetadata
+    title: RanobeLibTitleUrl,
+    inventory: ChapterInventory,
+    title_detail: TitleDetailMetadata,
 ) -> str:
     groups: dict[str, list[ChapterBranchVariant]] = {}
     for variant in inventory.buildable_variants:
@@ -818,7 +896,11 @@ def _branch_cards(
         return '<article class="branch-card"><div class="branch-body"><p class="bad">Нет доступных для сборки вариантов.</p></div></article>'
     cards = []
     for branch_id, variants in groups.items():
-        cards.append(_branch_card(title, branch_id, tuple(variants), inventory.variants, title_detail))
+        cards.append(
+            _branch_card(
+                title, branch_id, tuple(variants), inventory.variants, title_detail
+            )
+        )
     return "\n".join(cards)
 
 
@@ -832,16 +914,35 @@ def _branch_card(
     label = _branch_label(variants[0])
     vol_min, vol_max = _number_bounds([variant.volume for variant in variants])
     ch_min, ch_max = _number_bounds([variant.number for variant in variants])
-    hidden_bulk = "\n".join(
-        f'<input type="hidden" name="bulk_variant" value="{escape(_variant_form_value(variant), quote=True)}">'
+    volume_values = {
+        _normalize_number_text(variant.volume)
         for variant in variants
+        if variant.volume is not None
+    }
+    single_volume = len(volume_values) <= 1
+    duplicate_chapters = _chapter_numbers_repeat_across_volumes(variants)
+    show_volume_fields = (not single_volume) or duplicate_chapters
+    default_volume = vol_min if single_volume else None
+    chapter_from_default = ch_min or ""
+    chapter_to_default = ch_max or ""
+    hidden_bulk = "\n".join(
+        '<input type="hidden" name="bulk_variant" data-bulk-variant '
+        f'data-volume-number="{escape(str(variant.volume or ""), quote=True)}" '
+        f'data-chapter-number="{escape(str(variant.number or ""), quote=True)}" '
+        f'value="{escape(_variant_form_value(variant), quote=True)}">'
+        for variant in variants
+    )
+    volume_inputs = _custom_volume_inputs(
+        show_volume_fields, vol_min, vol_max, default_volume
+    )
+    quick_actions = _quick_actions(
+        variants, vol_min, vol_max, default_volume, single_volume
     )
     volumes = _volume_sections(variants)
     non_buildable = _non_buildable_for_branch(branch_id, all_variants)
-    range_hint = f"том {vol_min or 'мин.'}–{vol_max or 'макс.'}, глава {ch_min or 'мин.'}–{ch_max or 'макс.'}"
     return f"""
       <article class="branch-card">
-        <form action="/build" method="post" data-branch-form data-branch-size="{len(variants)}">
+        <form action="/build" method="post" data-branch-form data-branch-size="{len(variants)}" data-max-build="{MAX_SYNC_BUILD_VARIANTS}">
           <input type="hidden" name="title_url" value="{escape(title.canonical_url, quote=True)}">
           <input type="hidden" name="book_title" value="{escape(title_detail.display_title, quote=True)}">
           <input type="hidden" name="author" value="{escape(title_detail.author, quote=True)}">
@@ -855,29 +956,32 @@ def _branch_card(
             <h3>{escape(label)}</h3>
             <div class="branch-meta">
               <span class="pill">ID ветки: {escape(branch_id)}</span>
-              <span class="pill">Глав доступно: {len(variants)}</span>
-              <span class="pill">Диапазон томов: {escape(str(vol_min or '—'))}–{escape(str(vol_max or '—'))}</span>
-              <span class="pill">Диапазон глав: {escape(str(ch_min or '—'))}–{escape(str(ch_max or '—'))}</span>
+              <span class="pill">Главы: {escape(_range_label(ch_min, ch_max))}</span>
+              <span class="pill">{escape(_volume_summary(vol_min, vol_max))}</span>
+              <span class="pill">Доступно для сборки: {len(variants)} глав</span>
             </div>
           </header>
           <div class="branch-body">
+            {quick_actions}
             <fieldset class="range">
-              <legend>Выбрать диапазон внутри этой ветки</legend>
-              <p class="muted">Фильтры диапазона применяются только к этой ветке. Доступный диапазон: {escape(range_hint)}.</p>
+              <legend>Свой диапазон</legend>
               <div class="range-grid">
-                <label>Том от <input name="volume_from" inputmode="decimal" placeholder="{escape(str(vol_min or 'от'), quote=True)}"></label>
-                <label>Том до <input name="volume_to" inputmode="decimal" placeholder="{escape(str(vol_max or 'до'), quote=True)}"></label>
-                <label>Глава от <input name="chapter_from" inputmode="decimal" placeholder="{escape(str(ch_min or 'от'), quote=True)}"></label>
-                <label>Глава до <input name="chapter_to" inputmode="decimal" placeholder="{escape(str(ch_max or 'до'), quote=True)}"></label>
+                {volume_inputs}
+                <label>С главы <input name="chapter_from" data-custom-chapter-from inputmode="decimal" value="{escape(chapter_from_default, quote=True)}" placeholder="{escape(str(ch_min or '1'), quote=True)}"></label>
+                <label>по главу <input name="chapter_to" data-custom-chapter-to inputmode="decimal" value="{escape(chapter_to_default, quote=True)}" placeholder="{escape(str(ch_max or MAX_SYNC_BUILD_VARIANTS), quote=True)}"></label>
               </div>
+              <p class="range-message" data-range-message aria-live="polite">Будет собрано: {min(len(variants), MAX_SYNC_BUILD_VARIANTS)} глав</p>
+              <div class="actions"><button type="submit" name="selection_mode" value="range" data-custom-range-submit>Собрать выбранный диапазон</button></div>
             </fieldset>
-            {volumes}
-            {non_buildable}
-            <div class="actions">
-              <button type="submit" name="selection_mode" value="range">Собрать эту ветку/диапазон</button>
-              <button class="secondary" type="submit" name="selection_mode" value="checked">Собрать отмеченные главы</button>
-              <span class="muted"><span data-selected-count>0</span> отмечено; иллюстрации берутся из настроек сборки; лимит синхронной сборки {MAX_SYNC_BUILD_VARIANTS}.</span>
-            </div>
+            <details class="manual-selection">
+              <summary><strong>Ручной выбор глав</strong> · Показать список глав</summary>
+              {volumes}
+              {non_buildable}
+              <div class="actions">
+                <button class="secondary" type="submit" name="selection_mode" value="checked">Собрать отмеченные главы</button>
+                <span class="muted"><span data-selected-count>0</span> отмечено; иллюстрации берутся из настроек сборки; лимит синхронной сборки {MAX_SYNC_BUILD_VARIANTS}.</span>
+              </div>
+            </details>
             <div class="progress-note" role="status" aria-live="polite" data-build-active-state>
               <div class="bar" aria-hidden="true"></div>
               <p><strong>Собираю EPUB…</strong> <span data-build-status-message>Задача поставлена в очередь; ожидаю начала сборки EPUB.</span></p>
@@ -898,6 +1002,88 @@ def _branch_card(
     """
 
 
+def _custom_volume_inputs(
+    show_volume_fields: bool,
+    vol_min: str | None,
+    vol_max: str | None,
+    default_volume: str | None,
+) -> str:
+    if show_volume_fields:
+        return (
+            f'<label>Том от <input name="volume_from" inputmode="decimal" value="{escape(str(vol_min or ""), quote=True)}" placeholder="{escape(str(vol_min or "от"), quote=True)}"></label>'
+            f'<label>Том до <input name="volume_to" inputmode="decimal" value="{escape(str(vol_max or ""), quote=True)}" placeholder="{escape(str(vol_max or "до"), quote=True)}"></label>'
+        )
+    value = escape(str(default_volume or vol_min or ""), quote=True)
+    return f'<input type="hidden" name="volume_from" value="{value}"><input type="hidden" name="volume_to" value="{value}">'
+
+
+def _quick_actions(
+    variants: tuple[ChapterBranchVariant, ...],
+    vol_min: str | None,
+    vol_max: str | None,
+    default_volume: str | None,
+    single_volume: bool,
+) -> str:
+    chunks = (
+        [variants]
+        if len(variants) <= MAX_SYNC_BUILD_VARIANTS
+        else [
+            variants[index : index + MAX_SYNC_BUILD_VARIANTS]
+            for index in range(0, len(variants), MAX_SYNC_BUILD_VARIANTS)
+        ]
+    )
+    buttons = []
+    for chunk in chunks:
+        first, last = chunk[0], chunk[-1]
+        from_ch, to_ch = first.number or "", last.number or ""
+        if len(variants) <= MAX_SYNC_BUILD_VARIANTS:
+            label = "Собрать всю ветку"
+        else:
+            label = f"Собрать главы {_range_label(from_ch, to_ch)}"
+        from_vol = default_volume if single_volume else (first.volume or vol_min or "")
+        to_vol = default_volume if single_volume else (last.volume or vol_max or "")
+        buttons.append(
+            '<button type="submit" data-quick-range-submit name="selection_mode" value="range" '
+            f'data-chapter-from="{escape(from_ch, quote=True)}" data-chapter-to="{escape(to_ch, quote=True)}" '
+            f'data-volume-from="{escape(str(from_vol), quote=True)}" data-volume-to="{escape(str(to_vol), quote=True)}">'
+            f"{escape(label)}</button>"
+        )
+    return (
+        '<section class="quick-actions"><h4>Быстрые действия</h4><div class="actions">'
+        + "".join(buttons)
+        + "</div></section>"
+    )
+
+
+def _range_label(start: str | None, end: str | None) -> str:
+    if start and end and start != end:
+        return f"{start}–{end}"
+    return start or end or "—"
+
+
+def _volume_summary(start: str | None, end: str | None) -> str:
+    label = _range_label(start, end)
+    return f"Том: {label}" if start == end else f"Тома: {label}"
+
+
+def _normalize_number_text(value: str | None) -> str:
+    parsed = _parse_number(value)
+    return f"{parsed:g}" if parsed is not None else str(value)
+
+
+def _chapter_numbers_repeat_across_volumes(
+    variants: tuple[ChapterBranchVariant, ...],
+) -> bool:
+    seen: dict[str, str] = {}
+    for variant in variants:
+        chapter = _normalize_number_text(variant.number)
+        volume = _normalize_number_text(variant.volume)
+        if chapter in seen and seen[chapter] != volume:
+            return True
+        seen[chapter] = volume
+    return False
+
+
 def _volume_sections(variants: tuple[ChapterBranchVariant, ...]) -> str:
     by_volume: dict[str, list[ChapterBranchVariant]] = {}
     for variant in variants:
@@ -905,7 +1091,9 @@ def _volume_sections(variants: tuple[ChapterBranchVariant, ...]) -> str:
     sections = []
     for volume, volume_variants in by_volume.items():
         rows = "\n".join(_chapter_row(variant) for variant in volume_variants)
-        sections.append(f'<section class="volume-group"><h4 class="volume-title">Том {escape(volume)}</h4><table><thead><tr><th>Выбор</th><th>Том</th><th>Глава</th><th>Название</th></tr></thead><tbody>{rows}</tbody></table></section>')
+        sections.append(
+            f'<section class="volume-group"><h4 class="volume-title">Том {escape(volume)}</h4><table><thead><tr><th>Выбор</th><th>Том</th><th>Глава</th><th>Название</th></tr></thead><tbody>{rows}</tbody></table></section>'
+        )
     return "\n".join(sections)
 
 
@@ -914,18 +1102,30 @@ def _chapter_row(variant: ChapterBranchVariant) -> str:
     return f'<tr><td><label><input type="checkbox" name="selected_variant" value="{value}"> Собрать</label></td><td>{escape(str(variant.volume))}</td><td>{escape(str(variant.number))}</td><td>{escape(variant.chapter_title or "—")}</td></tr>'
 
 
-def _non_buildable_for_branch(branch_id: str, variants: tuple[ChapterBranchVariant, ...]) -> str:
-    rows = [variant for variant in variants if not variant.is_buildable and (variant.branch_id is None or str(variant.branch_id) == branch_id)]
+def _non_buildable_for_branch(
+    branch_id: str, variants: tuple[ChapterBranchVariant, ...]
+) -> str:
+    rows = [
+        variant
+        for variant in variants
+        if not variant.is_buildable
+        and (variant.branch_id is None or str(variant.branch_id) == branch_id)
+    ]
     if not rows:
         return ""
-    items = "\n".join(f'<li>{escape(variant.display_label)} <span class="bad">нельзя выбрать / недоступно для сборки</span></li>' for variant in rows)
-    return f'<details><summary>Недоступные для сборки варианты показаны отдельно</summary><ul>{items}</ul></details>'
+    items = "\n".join(
+        f'<li>{escape(variant.display_label)} <span class="bad">нельзя выбрать / недоступно для сборки</span></li>'
+        for variant in rows
+    )
+    return f"<details><summary>Недоступные для сборки варианты показаны отдельно</summary><ul>{items}</ul></details>"
 
 
 def _branch_label(variant: ChapterBranchVariant) -> str:
     if variant.branch_team or variant.branch_user:
         return variant.branch_team or variant.branch_user or ""
-    return "Основная ветка" if variant.is_default_branch else f"Ветка {variant.branch_id}"
+    return (
+        "Основная ветка" if variant.is_default_branch else f"Ветка {variant.branch_id}"
+    )
 
 
 def _branch_key(variant: ChapterBranchVariant) -> str:
@@ -943,7 +1143,9 @@ def _number_bounds(values: list[str | None]) -> tuple[str | None, str | None]:
     return min(parsed)[1], max(parsed)[1]
 
 
-def _branch_options(variants: tuple[ChapterBranchVariant, ...]) -> tuple[tuple[str, str], ...]:
+def _branch_options(
+    variants: tuple[ChapterBranchVariant, ...],
+) -> tuple[tuple[str, str], ...]:
     options: list[tuple[str, str]] = []
     seen: set[str] = set()
     for variant in variants:
@@ -959,7 +1161,7 @@ def _branch_options(variants: tuple[ChapterBranchVariant, ...]) -> tuple[tuple[s
 def _variant_selector(variant: ChapterBranchVariant) -> str:
     label = escape(variant.display_label)
     if not variant.is_buildable:
-        return f"{label} <span class=\"bad\" aria-label=\"нельзя выбрать\">нельзя выбрать</span>"
+        return f'{label} <span class="bad" aria-label="нельзя выбрать">нельзя выбрать</span>'
     value = escape(_variant_form_value(variant), quote=True)
     return (
         "<label>"
