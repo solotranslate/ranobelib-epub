@@ -21,6 +21,7 @@ from ranobelib_epub.content import (
     Paragraph,
     TextRun,
 )
+from ranobelib_epub.images import ImageAsset, image_source_url
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,17 +43,20 @@ def build_epub(
     metadata: BookMetadata,
     chapters: Iterable[NormalizedChapter],
     output: OutputTarget | None = None,
+    *,
+    image_assets: dict[str, ImageAsset] | None = None,
 ) -> bytes | None:
     """Build an EPUB from normalized chapters without network or filesystem side effects.
 
     If ``output`` is omitted, EPUB bytes are returned. If ``output`` is a path or a binary
     file-like object, bytes are written only to that explicit target and ``None`` is returned.
-    Image blocks are intentionally not downloaded or embedded; every skipped image emits a
-    ``UserWarning``.
+    Image blocks are not downloaded by this builder. If ``image_assets`` is omitted, the
+    historical skip-with-warning behavior is preserved. Callers may opt in by passing
+    bounded in-memory assets fetched elsewhere.
     """
 
     chapter_list = tuple(chapters)
-    book = _build_book(metadata, chapter_list)
+    book = _build_book(metadata, chapter_list, image_assets or {})
     options = {"raise_exceptions": True}
 
     if output is None:
@@ -64,10 +68,15 @@ def build_epub(
     return None
 
 
-def build_epub_bytes(metadata: BookMetadata, chapters: Iterable[NormalizedChapter]) -> bytes:
+def build_epub_bytes(
+    metadata: BookMetadata,
+    chapters: Iterable[NormalizedChapter],
+    *,
+    image_assets: dict[str, ImageAsset] | None = None,
+) -> bytes:
     """Return EPUB bytes for callers that do not want to write to disk."""
 
-    built = build_epub(metadata, chapters)
+    built = build_epub(metadata, chapters, image_assets=image_assets)
     assert built is not None
     return built
 
@@ -76,13 +85,19 @@ def write_epub(
     metadata: BookMetadata,
     chapters: Iterable[NormalizedChapter],
     output: OutputTarget,
+    *,
+    image_assets: dict[str, ImageAsset] | None = None,
 ) -> None:
     """Write an EPUB to an explicit path or binary file-like object."""
 
-    build_epub(metadata, chapters, output=output)
+    build_epub(metadata, chapters, output=output, image_assets=image_assets)
 
 
-def _build_book(metadata: BookMetadata, chapters: tuple[NormalizedChapter, ...]) -> epub.EpubBook:
+def _build_book(
+    metadata: BookMetadata,
+    chapters: tuple[NormalizedChapter, ...],
+    image_assets: dict[str, ImageAsset],
+) -> epub.EpubBook:
     title = metadata.title.strip()
     if not title:
         raise ValueError("EPUB title must not be empty")
@@ -107,7 +122,7 @@ def _build_book(metadata: BookMetadata, chapters: tuple[NormalizedChapter, ...])
             file_name=_chapter_file_name(index),
             lang=language,
         )
-        item.content = _render_chapter(chapter)
+        item.content = _render_chapter(chapter, image_assets)
         book.add_item(item)
         epub_chapters.append(item)
 
@@ -115,6 +130,15 @@ def _build_book(metadata: BookMetadata, chapters: tuple[NormalizedChapter, ...])
         epub.Link(item.file_name, item.title, f"chapter-{index:04d}")
         for index, item in enumerate(epub_chapters, start=1)
     )
+    for asset in image_assets.values():
+        book.add_item(
+            epub.EpubItem(
+                file_name=asset.file_name,
+                media_type=asset.media_type,
+                content=asset.content,
+            )
+        )
+
     book.spine = ["nav", *epub_chapters]
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
@@ -136,17 +160,17 @@ def _chapter_file_name(index: int) -> str:
     return f"chapters/chapter-{index:04d}.xhtml"
 
 
-def _render_chapter(chapter: NormalizedChapter) -> str:
+def _render_chapter(chapter: NormalizedChapter, image_assets: dict[str, ImageAsset]) -> str:
     body = [f"<h1>{escape(chapter.toc_title or chapter.generated_title)}</h1>"]
-    body.extend(_render_block(block) for block in chapter.blocks)
+    body.extend(_render_block(block, image_assets) for block in chapter.blocks)
     return "\n".join(body)
 
 
-def _render_blocks(blocks: tuple[ChapterBlock, ...]) -> str:
-    return "\n".join(_render_block(block) for block in blocks)
+def _render_blocks(blocks: tuple[ChapterBlock, ...], image_assets: dict[str, ImageAsset]) -> str:
+    return "\n".join(_render_block(block, image_assets) for block in blocks)
 
 
-def _render_block(block: ChapterBlock) -> str:
+def _render_block(block: ChapterBlock, image_assets: dict[str, ImageAsset]) -> str:
     if isinstance(block, Paragraph):
         if not block.runs:
             return "<p><br /></p>"
@@ -156,20 +180,28 @@ def _render_block(block: ChapterBlock) -> str:
         return f"<h{level}>{_render_runs(block.runs)}</h{level}>"
     if isinstance(block, ChapterList):
         tag = "ol" if block.kind == "ordered" else "ul"
-        items = "".join(f"<li>{_render_blocks(item.blocks)}</li>" for item in block.items)
+        items = "".join(
+            f"<li>{_render_blocks(item.blocks, image_assets)}</li>" for item in block.items
+        )
         return f"<{tag}>{items}</{tag}>"
     if isinstance(block, Blockquote):
-        return f"<blockquote>{_render_blocks(block.blocks)}</blockquote>"
+        return f"<blockquote>{_render_blocks(block.blocks, image_assets)}</blockquote>"
     if isinstance(block, HorizontalRule):
         return "<hr />"
     if isinstance(block, Image):
-        image_name = block.name or block.src or block.alt or "unknown image"
-        warnings.warn(
-            f"Image block {image_name!r} skipped during EPUB build",
-            UserWarning,
-            stacklevel=2,
-        )
-        return ""
+        source_url = image_source_url(block)
+        asset = image_assets.get(source_url) if source_url else None
+        if asset is None:
+            image_name = block.name or block.src or block.alt or "unknown image"
+            warnings.warn(
+                f"Image block {image_name!r} skipped during EPUB build",
+                UserWarning,
+                stacklevel=2,
+            )
+            return ""
+        alt = escape(block.alt or block.title or block.name or "")
+        title = f' title="{escape(block.title)}"' if block.title else ""
+        return f'<figure><img src="../{escape(asset.file_name)}" alt="{alt}"{title} /></figure>'
     raise TypeError(f"Unsupported chapter block: {block!r}")
 
 
