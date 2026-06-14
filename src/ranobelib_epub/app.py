@@ -16,6 +16,7 @@ from ranobelib_epub.ranobelib import RanobeLibTitleUrl, parse_title_url
 
 app = FastAPI(title="RanobeLib EPUB Builder")
 _SAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+_LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 
 
 class InventoryService(Protocol):
@@ -36,7 +37,10 @@ def get_inventory_service() -> InventoryService:
 
 class BuildService(Protocol):
     def build(
-        self, title: RanobeLibTitleUrl, variants: tuple[ChapterBranchVariant, ...]
+        self,
+        title: RanobeLibTitleUrl,
+        metadata: BookMetadata,
+        variants: tuple[ChapterBranchVariant, ...],
     ) -> bytes: ...
 
 
@@ -44,10 +48,15 @@ class RanobeLibBuildService:
     def __init__(self, transport: HttpxInventoryTransport | None = None) -> None:
         self._transport = transport or HttpxInventoryTransport()
 
-    def build(self, title: RanobeLibTitleUrl, variants: tuple[ChapterBranchVariant, ...]) -> bytes:
+    def build(
+        self,
+        title: RanobeLibTitleUrl,
+        metadata: BookMetadata,
+        variants: tuple[ChapterBranchVariant, ...],
+    ) -> bytes:
         result = build_selected_chapter_epub(
             title.slug,
-            BookMetadata(title=title.slug, identifier=title.canonical_url),
+            metadata,
             variants,
             self._transport,
         )
@@ -148,6 +157,11 @@ def build_epub_download(
     title_url: Annotated[str, Form(min_length=1)],
     selected_variant: Annotated[list[str] | None, Form()] = None,
     bulk_variant: Annotated[list[str] | None, Form()] = None,
+    book_title: Annotated[str | None, Form()] = None,
+    author: Annotated[str | None, Form()] = None,
+    translator: Annotated[str | None, Form()] = None,
+    team: Annotated[str | None, Form()] = None,
+    language: Annotated[str | None, Form()] = None,
     bulk_branch_id: Annotated[str | None, Form()] = None,
     volume_from: Annotated[str | None, Form()] = None,
     volume_to: Annotated[str | None, Form()] = None,
@@ -157,6 +171,14 @@ def build_epub_download(
 ) -> Response:
     try:
         title = parse_title_url(title_url)
+        metadata = _book_metadata_from_form(
+            title,
+            book_title=book_title,
+            author=author,
+            translator=translator,
+            team=team,
+            language=language,
+        )
         variants = _selected_variants(
             selected_variant or [],
             bulk_variant or [],
@@ -170,7 +192,7 @@ def build_epub_download(
         return _error_page(str(exc), status_code=400)
 
     try:
-        epub_bytes = service.build(title, variants)
+        epub_bytes = service.build(title, metadata, variants)
     except ValueError as exc:
         return _error_page(str(exc), status_code=400)
 
@@ -197,6 +219,36 @@ def _error_page(message: str, *, status_code: int) -> HTMLResponse:
 </html>
 """
     return HTMLResponse(html, status_code=status_code)
+
+
+def _book_metadata_from_form(
+    title: RanobeLibTitleUrl,
+    *,
+    book_title: str | None,
+    author: str | None,
+    translator: str | None,
+    team: str | None,
+    language: str | None,
+) -> BookMetadata:
+    if book_title is None:
+        normalized_title = title.slug
+    else:
+        normalized_title = _optional_text(book_title)
+        if normalized_title is None:
+            raise ValueError("Book title must not be blank")
+
+    normalized_language = _optional_text(language) or "ru"
+    if not _LANGUAGE_TAG.fullmatch(normalized_language):
+        raise ValueError("Language must be a valid language tag")
+
+    return BookMetadata(
+        title=normalized_title,
+        author=_optional_text(author),
+        translator=_optional_text(translator),
+        team=_optional_text(team),
+        language=normalized_language.lower(),
+        identifier=title.canonical_url,
+    )
 
 
 def _selected_variants(
@@ -433,6 +485,19 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
     <h2>Variants</h2>
     <form action="/build" method="post">
       <input type="hidden" name="title_url" value="{escape(title.canonical_url, quote=True)}">
+      <fieldset>
+        <legend>EPUB metadata</legend>
+        <label for="book_title">Book title</label>
+        <input id="book_title" name="book_title" value="{escape(title.slug, quote=True)}" required>
+        <label for="author">Author</label>
+        <input id="author" name="author" placeholder="optional">
+        <label for="translator">Translator</label>
+        <input id="translator" name="translator" placeholder="optional">
+        <label for="team">Team</label>
+        <input id="team" name="team" placeholder="optional">
+        <label for="language">Language</label>
+        <input id="language" name="language" value="ru" required>
+      </fieldset>
       {bulk_values}
       {bulk_controls}
       <table>
