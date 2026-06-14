@@ -273,7 +273,7 @@ def test_row_without_branch_id_remains_non_buildable_with_warning() -> None:
     assert inventory.warnings[0].variant_id == 100
 
 
-def test_branch_id_does_not_fallback_to_branch_payload_id() -> None:
+def test_single_missing_branch_id_does_not_use_branch_payload_id_as_branch_id() -> None:
     inventory = parse_chapter_inventory(
         "demo-title",
         {
@@ -292,9 +292,92 @@ def test_branch_id_does_not_fallback_to_branch_payload_id() -> None:
     assert len(inventory.variants) == 1
     assert inventory.variants[0].external_chapter_id == 501
     assert inventory.variants[0].branch_id is None
-    assert inventory.variants[0].is_buildable is False
+    assert inventory.variants[0].is_default_branch is True
+    assert inventory.variants[0].is_buildable is True
+    assert len(inventory.buildable_variants) == 1
+    assert inventory.warnings == ()
+
+
+def test_single_default_branch_variant_becomes_buildable_and_preserves_label() -> None:
+    inventory = parse_chapter_inventory(
+        "default-title",
+        {
+            "data": [
+                {
+                    "id": 4163383,
+                    "volume": 1,
+                    "number": 1,
+                    "branches_count": 1,
+                    "branches": [
+                        {
+                            "id": 4163383,
+                            "branch_id": None,
+                            "teams": [{"slug": "solotranslating"}],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert len(inventory.variants) == 1
+    variant = inventory.variants[0]
+    assert variant.external_chapter_id == 4163383
+    assert variant.branch_id is None
+    assert variant.is_default_branch is True
+    assert variant.is_buildable is True
+    assert variant.branch_team == "solotranslating"
+    assert variant.display_label == "Volume 1 Chapter 1 — solotranslating"
+    assert inventory.buildable_variants[0].is_default_branch is True
+    assert inventory.warnings == ()
+
+
+def test_default_branch_content_request_omits_branch_id() -> None:
+    variant = ChapterBranchVariant(
+        4163383,
+        None,
+        "1",
+        "1",
+        None,
+        None,
+        branch_team="solotranslating",
+        is_default_branch=True,
+    )
+
+    request = build_chapter_content_request(
+        "default-title", variant, base_url="https://api.example.test"
+    )
+
+    assert (
+        request.url
+        == "https://api.example.test/api/manga/default-title/chapter?number=1&volume=1"
+    )
+
+
+def test_multi_branch_missing_branch_id_remains_non_buildable() -> None:
+    inventory = parse_chapter_inventory(
+        "ambiguous-title",
+        {
+            "data": [
+                {
+                    "id": 100,
+                    "volume": "1",
+                    "number": "1",
+                    "branches": [
+                        {"id": 100, "branch_id": None, "teams": [{"slug": "team-a"}]},
+                        {"id": 101, "branch_id": None, "teams": [{"slug": "team-b"}]},
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert len(inventory.variants) == 2
+    assert all(variant.branch_id is None for variant in inventory.variants)
+    assert all(variant.is_default_branch is False for variant in inventory.variants)
+    assert all(variant.is_buildable is False for variant in inventory.variants)
     assert inventory.buildable_variants == ()
-    assert inventory.warnings[0].message == "Chapter branch variant is not buildable"
+    assert len(inventory.warnings) == 2
 
 
 def test_produces_deterministic_display_label_for_unnamed_chapter() -> None:

@@ -86,6 +86,30 @@ class FakeRowLevelBranchInventoryService:
         )
 
 
+class FakeDefaultBranchInventoryService:
+    def fetch(self, title: RanobeLibTitleUrl) -> ChapterInventory:
+        return parse_chapter_inventory(
+            title.slug,
+            {
+                "data": [
+                    {
+                        "id": 4163383,
+                        "volume": 1,
+                        "number": 1,
+                        "branches_count": 1,
+                        "branches": [
+                            {
+                                "id": 4163383,
+                                "branch_id": None,
+                                "teams": [{"slug": "solotranslating"}],
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+
 class FakeBuildService:
     def __init__(self) -> None:
         self.calls: list[
@@ -580,6 +604,27 @@ def test_inventory_preview_renders_row_level_branch_id_variant() -> None:
     assert "Team A" in response.text
     assert 'name="selected_variant"' in response.text
     assert response.text.count('<input type="checkbox" name="selected_variant"') == 1
+
+
+def test_inventory_preview_renders_default_branch_variant() -> None:
+    service = FakeDefaultBranchInventoryService()
+    app.dependency_overrides[get_inventory_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/inventory", params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"}
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "No buildable variants available." not in response.text
+    assert "Branch ID: default" in response.text
+    assert "Buildable chapters: 1" in response.text
+    assert "solotranslating" in response.text
+    assert 'name="selected_variant"' in response.text
+    assert "&quot;is_default_branch&quot;:true" in response.text
 
 
 def test_build_route_accepts_bulk_payload_when_no_manual_checkbox_selected() -> None:
