@@ -109,8 +109,11 @@ class HttpxInventoryTransport:
     timeout: float = 20.0
 
     def get_json(self, request: ChapterRequest) -> dict[str, Any]:
+        if request.method.upper() != "GET":
+            raise ValueError("RanobeLib inventory transport supports only read-only GET requests")
+        safe_headers = _public_headers(request.headers)
         response = httpx.request(
-            request.method, request.url, headers=request.headers, timeout=self.timeout
+            request.method, request.url, headers=safe_headers, timeout=self.timeout
         )
         response.raise_for_status()
         payload = response.json()
@@ -245,7 +248,7 @@ def _variant_from_branch(
     source = branch or {}
     return ChapterBranchVariant(
         external_chapter_id=_first(source, "chapter_id", "chapterId", "id") or logical.logical_id,
-        branch_id=_first(source, "branch_id", "branchId", "id"),
+        branch_id=_first(source, "branch_id", "branchId"),
         volume=_text(_first(source, "volume")) or logical.volume,
         number=_text(_first(source, "number")) or logical.number,
         number_secondary=_text(_first(source, "number_secondary", "numberSecondary"))

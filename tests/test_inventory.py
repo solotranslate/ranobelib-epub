@@ -2,10 +2,38 @@ import pytest
 
 from ranobelib_epub.inventory import (
     ChapterBranchVariant,
+    ChapterRequest,
+    HttpxInventoryTransport,
     build_chapter_content_request,
     build_inventory_request,
     parse_chapter_inventory,
 )
+
+
+def test_httpx_transport_rejects_non_get_requests_before_sending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_request(*args: object, **kwargs: object) -> None:
+        raise AssertionError("transport attempted to send a non-GET request")
+
+    monkeypatch.setattr("ranobelib_epub.inventory.httpx.request", fail_request)
+
+    with pytest.raises(ValueError, match="only read-only GET"):
+        HttpxInventoryTransport().get_json(ChapterRequest("POST", "https://api.example.test"))
+
+
+def test_httpx_transport_rejects_private_headers_before_sending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_request(*args: object, **kwargs: object) -> None:
+        raise AssertionError("transport attempted to send a private header")
+
+    monkeypatch.setattr("ranobelib_epub.inventory.httpx.request", fail_request)
+
+    with pytest.raises(ValueError, match="Forbidden private headers"):
+        HttpxInventoryTransport().get_json(
+            ChapterRequest("GET", "https://api.example.test", {"Authorization": "Bearer x"})
+        )
 
 
 def test_builds_expected_inventory_request_for_valid_slug() -> None:
@@ -96,6 +124,30 @@ def test_inventory_retains_non_buildable_variants_with_warnings() -> None:
     )
 
     assert len(inventory.variants) == 1
+    assert inventory.variants[0].is_buildable is False
+    assert inventory.buildable_variants == ()
+    assert inventory.warnings[0].message == "Chapter branch variant is not buildable"
+
+
+def test_branch_id_does_not_fallback_to_branch_payload_id() -> None:
+    inventory = parse_chapter_inventory(
+        "demo-title",
+        {
+            "data": [
+                {
+                    "id": 100,
+                    "volume": "1",
+                    "number": "2",
+                    "name": "Branch id missing",
+                    "branches": [{"id": 999, "chapter_id": 501}],
+                }
+            ]
+        },
+    )
+
+    assert len(inventory.variants) == 1
+    assert inventory.variants[0].external_chapter_id == 501
+    assert inventory.variants[0].branch_id is None
     assert inventory.variants[0].is_buildable is False
     assert inventory.buildable_variants == ()
     assert inventory.warnings[0].message == "Chapter branch variant is not buildable"
