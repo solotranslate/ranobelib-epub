@@ -4,7 +4,7 @@ from html import escape
 from typing import Protocol
 
 from fastapi import Depends, FastAPI, Query
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse
 
 from ranobelib_epub.inventory import ChapterInventory, fetch_chapter_inventory
 from ranobelib_epub.inventory import HttpxInventoryTransport
@@ -96,11 +96,11 @@ def index() -> str:
 """
 
 
-@app.get("/inventory", response_class=HTMLResponse)
+@app.get("/inventory", response_class=HTMLResponse, response_model=None)
 def inventory_preview(
     title_url: str = Query(..., min_length=1),
     service: InventoryService = Depends(get_inventory_service),
-) -> str | Response:
+) -> HTMLResponse:
     try:
         title = parse_title_url(title_url)
     except ValueError as exc:
@@ -111,7 +111,7 @@ def inventory_preview(
     except ValueError as exc:
         return _error_page(str(exc), status_code=400)
 
-    return _inventory_page(title, inventory)
+    return HTMLResponse(_inventory_page(title, inventory))
 
 
 def _error_page(message: str, *, status_code: int) -> HTMLResponse:
