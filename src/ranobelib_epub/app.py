@@ -176,6 +176,7 @@ def build_epub_download(
     chapter_from: Annotated[str | None, Form()] = None,
     chapter_to: Annotated[str | None, Form()] = None,
     include_images: Annotated[bool, Form()] = False,
+    selection_mode: Annotated[str | None, Form()] = None,
     service: BuildService = Depends(get_build_service),
 ) -> Response:
     try:
@@ -196,6 +197,7 @@ def build_epub_download(
             volume_to=volume_to,
             chapter_from=chapter_from,
             chapter_to=chapter_to,
+            selection_mode=selection_mode,
         )
     except ValueError as exc:
         return _error_page(str(exc), status_code=400)
@@ -269,9 +271,35 @@ def _selected_variants(
     volume_to: str | None = None,
     chapter_from: str | None = None,
     chapter_to: str | None = None,
+    selection_mode: str | None = None,
 ) -> tuple[ChapterBranchVariant, ...]:
     selected: tuple[ChapterBranchVariant, ...]
-    if raw_variants:
+    mode = _optional_text(selection_mode)
+    if mode not in {None, "checked", "range"}:
+        raise ValueError("Selection mode is malformed")
+
+    if mode == "checked":
+        if not raw_variants:
+            raise ValueError("Select at least one checked chapter variant")
+        selected = _dedupe_variants(
+            _parse_variant_values(raw_variants, source="Selected variant")
+        )
+    elif mode == "range":
+        if not bulk_variants:
+            raise ValueError("Select at least one buildable chapter variant")
+        candidates = _parse_variant_values(bulk_variants, source="Bulk variant")
+        variants = _filter_bulk_variants(
+            candidates,
+            bulk_branch_id=bulk_branch_id,
+            volume_from=volume_from,
+            volume_to=volume_to,
+            chapter_from=chapter_from,
+            chapter_to=chapter_to,
+        )
+        if not variants:
+            raise ValueError("Bulk selection did not match any buildable chapter variants")
+        selected = _dedupe_variants(variants)
+    elif raw_variants:
         selected = _dedupe_variants(_parse_variant_values(raw_variants, source="Selected variant"))
     elif bulk_variants:
         candidates = _parse_variant_values(bulk_variants, source="Bulk variant")
@@ -614,8 +642,8 @@ def _branch_card(
             {volumes}
             {non_buildable}
             <div class="actions">
-              <button type="submit">Build this branch/range</button>
-              <button class="secondary" type="submit">Build checked chapters</button>
+              <button type="submit" name="selection_mode" value="range">Build this branch/range</button>
+              <button class="secondary" type="submit" name="selection_mode" value="checked">Build checked chapters</button>
               <span class="muted"><span data-selected-count>0</span> checked; images on/off follows Build settings; sync limit {MAX_SYNC_BUILD_VARIANTS}.</span>
             </div>
             <div class="progress-note" role="status" aria-live="polite">

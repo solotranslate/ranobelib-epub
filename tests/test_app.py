@@ -168,7 +168,7 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert 'name="include_images" value="true" checked' not in response.text
     assert "Images can make the build slower and the EPUB larger." in response.text
     assert 'name="selected_variant"' in response.text
-    assert response.text.count('name="selected_variant"') == 1
+    assert response.text.count('<input type="checkbox" name="selected_variant"') == 1
     assert "non-buildable" in response.text
     assert "not selectable" in response.text
     assert "Chapter branch variant is not buildable" in response.text
@@ -524,6 +524,94 @@ def test_build_route_accepts_bulk_payload_when_no_manual_checkbox_selected() -> 
     assert response.status_code == 200
     _, _, variants, include_images = service.calls[0]
     assert [variant.external_chapter_id for variant in variants] == [102]
+    assert include_images is False
+
+
+def test_build_route_checked_mode_uses_selected_variants() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": _variant_payload(
+                    external_chapter_id=201, branch_id=55, number="7"
+                ),
+                "bulk_variant": _variant_payload(
+                    external_chapter_id=202, branch_id=55, number="8"
+                ),
+                "selection_mode": "checked",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert len(service.calls) == 1
+    _, _, variants, include_images = service.calls[0]
+    assert [variant.external_chapter_id for variant in variants] == [201]
+    assert include_images is False
+
+
+def test_build_route_checked_mode_rejects_empty_selection_before_build_service() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "bulk_variant": _variant_payload(
+                    external_chapter_id=202, branch_id=55, number="8"
+                ),
+                "selection_mode": "checked",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert "Select at least one checked chapter variant" in response.text
+    assert "Traceback" not in response.text
+    assert service.calls == []
+
+
+def test_build_route_range_mode_uses_bulk_range_and_ignores_checked_variants() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": _variant_payload(
+                    external_chapter_id=999, branch_id=55, number="99"
+                ),
+                "bulk_variant": [
+                    _variant_payload(external_chapter_id=301, branch_id=55, number="1"),
+                    _variant_payload(external_chapter_id=302, branch_id=55, number="2"),
+                    _variant_payload(external_chapter_id=303, branch_id=66, number="2"),
+                ],
+                "bulk_branch_id": "55",
+                "chapter_from": "2",
+                "chapter_to": "2",
+                "selection_mode": "range",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert len(service.calls) == 1
+    _, _, variants, include_images = service.calls[0]
+    assert [variant.external_chapter_id for variant in variants] == [302]
     assert include_images is False
 
 
