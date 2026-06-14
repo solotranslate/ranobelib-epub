@@ -1,6 +1,4 @@
-import pytest
-
-from ranobelib_epub.ranobelib import (
+from ranobelib_epub.content import (
     Blockquote,
     ChapterList,
     Heading,
@@ -135,15 +133,69 @@ def test_normalize_chapter_payload_preserves_supported_read_content() -> None:
     assert image.attachment == chapter.attachments["map.png"]
     assert image.alt == "Map"
     assert image.title == "World map"
+    assert chapter.warnings == ()
 
 
-def test_normalize_chapter_payload_rejects_non_doc_content() -> None:
-    with pytest.raises(ValueError, match='type "doc"'):
-        normalize_chapter_payload({"data": {"content": {"type": "paragraph"}}})
+def test_normalize_chapter_payload_warns_for_non_doc_content() -> None:
+    chapter = normalize_chapter_payload({"data": {"content": {"type": "paragraph"}}})
+
+    assert chapter.blocks == ()
+    assert chapter.warnings == ('data.content type is not "doc"; chapter content skipped',)
 
 
-def test_normalize_chapter_payload_rejects_unsupported_nodes() -> None:
-    with pytest.raises(ValueError, match="Unsupported RanobeLib content node type"):
-        normalize_chapter_payload(
-            {"data": {"content": {"type": "doc", "content": [{"type": "table"}]}}}
-        )
+def test_normalize_chapter_payload_warns_for_unsupported_nodes() -> None:
+    chapter = normalize_chapter_payload(
+        {"data": {"content": {"type": "doc", "content": [{"type": "table"}]}}}
+    )
+
+    assert chapter.blocks == ()
+    assert chapter.warnings == ("Unsupported RanobeLib content node type 'table'; node skipped",)
+
+
+def test_normalize_chapter_payload_generates_unnamed_chapter_titles() -> None:
+    chapter = normalize_chapter_payload(
+        {
+            "data": {
+                "id": 42,
+                "volume": "2",
+                "number": "7",
+                "number_secondary": "5",
+                "slug": "ignored-when-numbered",
+                "content": {"type": "doc", "content": []},
+            }
+        }
+    )
+
+    assert chapter.id == 42
+    assert chapter.volume == "2"
+    assert chapter.number == "7"
+    assert chapter.number_secondary == "5"
+    assert chapter.source_title is None
+    assert chapter.source_name is None
+    assert chapter.generated_title == "Volume 2 Chapter 7.5"
+    assert chapter.toc_title == "Volume 2 Chapter 7.5"
+
+
+def test_normalize_chapter_payload_preserves_missing_image_attachment_with_warning() -> None:
+    chapter = normalize_chapter_payload(
+        {
+            "data": {
+                "content": {
+                    "type": "doc",
+                    "content": [
+                        {
+                            "type": "image",
+                            "attrs": {"images": [{"image": "missing.png"}]},
+                        }
+                    ],
+                },
+                "attachments": [],
+            }
+        }
+    )
+
+    image = chapter.blocks[0]
+    assert isinstance(image, Image)
+    assert image.name == "missing.png"
+    assert image.attachment is None
+    assert chapter.warnings == ("Image attachment 'missing.png' is missing; image preserved",)
