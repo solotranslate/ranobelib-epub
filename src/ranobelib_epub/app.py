@@ -370,7 +370,7 @@ def _filter_bulk_variants(
 
     selected: list[ChapterBranchVariant] = []
     for variant in variants:
-        if branch and str(variant.branch_id) != branch:
+        if branch and _branch_key(variant) != branch:
             continue
         if not _in_range(variant.volume, vol_min, vol_max):
             continue
@@ -421,7 +421,7 @@ def _dedupe_variants(variants: tuple[ChapterBranchVariant, ...]) -> tuple[Chapte
     for variant in variants:
         key = (
             str(variant.external_chapter_id),
-            str(variant.branch_id),
+            _branch_key(variant),
             str(variant.volume),
             str(variant.number),
         )
@@ -446,6 +446,7 @@ def _variant_from_form_payload(
         "branch_user",
         "published_at",
         "created_at",
+        "is_default_branch",
     }
     if any(key not in allowed for key in payload):
         raise ValueError(f"{source} at position {index} is malformed")
@@ -460,6 +461,7 @@ def _variant_from_form_payload(
         branch_user=_optional_text(payload.get("branch_user")),
         published_at=_optional_text(payload.get("published_at")),
         created_at=_optional_text(payload.get("created_at")),
+        is_default_branch=bool(payload.get("is_default_branch")),
     )
 
 
@@ -482,6 +484,7 @@ def _variant_form_value(variant: ChapterBranchVariant) -> str:
         "branch_user": variant.branch_user,
         "published_at": variant.published_at,
         "created_at": variant.created_at,
+        "is_default_branch": variant.is_default_branch,
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -624,7 +627,7 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
 def _branch_cards(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> str:
     groups: dict[str, list[ChapterBranchVariant]] = {}
     for variant in inventory.buildable_variants:
-        groups.setdefault(str(variant.branch_id), []).append(variant)
+        groups.setdefault(_branch_key(variant), []).append(variant)
     if not groups:
         return '<article class="branch-card"><div class="branch-body"><p class="bad">No buildable variants available.</p></div></article>'
     cards = []
@@ -727,7 +730,13 @@ def _non_buildable_for_branch(branch_id: str, variants: tuple[ChapterBranchVaria
 
 
 def _branch_label(variant: ChapterBranchVariant) -> str:
-    return variant.branch_team or variant.branch_user or f"Branch {variant.branch_id}"
+    if variant.branch_team or variant.branch_user:
+        return variant.branch_team or variant.branch_user or ""
+    return "Default branch" if variant.is_default_branch else f"Branch {variant.branch_id}"
+
+
+def _branch_key(variant: ChapterBranchVariant) -> str:
+    return "default" if variant.is_default_branch else str(variant.branch_id)
 
 
 def _number_bounds(values: list[str | None]) -> tuple[str | None, str | None]:
@@ -745,7 +754,7 @@ def _branch_options(variants: tuple[ChapterBranchVariant, ...]) -> tuple[tuple[s
     options: list[tuple[str, str]] = []
     seen: set[str] = set()
     for variant in variants:
-        branch_id = str(variant.branch_id)
+        branch_id = _branch_key(variant)
         if branch_id in seen:
             continue
         seen.add(branch_id)

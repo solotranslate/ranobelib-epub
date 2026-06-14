@@ -39,10 +39,12 @@ class ChapterBranchVariant:
     branch_user: str | None = None
     published_at: str | None = None
     created_at: str | None = None
+    is_default_branch: bool = False
 
     @property
     def is_buildable(self) -> bool:
-        return self.branch_id is not None and self.volume is not None and self.number is not None
+        has_branch_selector = self.branch_id is not None or self.is_default_branch
+        return has_branch_selector and self.volume is not None and self.number is not None
 
     @property
     def display_label(self) -> str:
@@ -53,9 +55,13 @@ class ChapterBranchVariant:
 
 @dataclass(frozen=True, slots=True)
 class BuildableChapterVariant(ChapterBranchVariant):
-    branch_id: int | str
+    branch_id: int | str | None
     volume: str
     number: str
+
+    def __post_init__(self) -> None:
+        if self.branch_id is None and not self.is_default_branch:
+            raise ValueError("Buildable default branch variants must be marked explicitly")
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +92,7 @@ class ChapterInventory:
                 buildable.append(
                     BuildableChapterVariant(
                         external_chapter_id=variant.external_chapter_id,
-                        branch_id=cast(int | str, variant.branch_id),
+                        branch_id=cast(int | str | None, variant.branch_id),
                         volume=cast(str, variant.volume),
                         number=cast(str, variant.number),
                         number_secondary=variant.number_secondary,
@@ -95,6 +101,7 @@ class ChapterInventory:
                         branch_user=variant.branch_user,
                         published_at=variant.published_at,
                         created_at=variant.created_at,
+                        is_default_branch=variant.is_default_branch,
                     )
                 )
         return tuple(buildable)
@@ -143,9 +150,12 @@ def build_chapter_content_request(
 ) -> ChapterRequest:
     if not variant.is_buildable:
         raise ValueError("Chapter content request requires a buildable branch variant")
-    query = urlencode(
-        {"branch_id": variant.branch_id, "number": variant.number, "volume": variant.volume}
-    )
+    query_params: dict[str, int | str | None] = {}
+    if not variant.is_default_branch:
+        query_params["branch_id"] = variant.branch_id
+    query_params["number"] = variant.number
+    query_params["volume"] = variant.volume
+    query = urlencode(query_params)
     clean_slug = quote(_validate_slug(slug), safe="")
     return ChapterRequest(
         method="GET",
@@ -168,8 +178,15 @@ def parse_chapter_inventory(slug: str, payload: dict[str, Any]) -> ChapterInvent
     warnings: list[InventoryWarning] = []
     for row in raw_items:
         logical = _logical_chapter(row)
+        branches = _branches(row)
         row_variants = tuple(
-            _variant_from_branch(logical, row, branch) for branch in _branches(row)
+            _variant_from_branch(
+                logical,
+                row,
+                branch,
+                is_default_branch=_is_single_default_branch(row, branches, branch),
+            )
+            for branch in branches
         )
         if not row_variants:
             row_variants = (_variant_from_branch(logical, row, None),)
@@ -243,7 +260,11 @@ def _branches(row: dict[str, Any]) -> tuple[dict[str, Any] | None, ...]:
 
 
 def _variant_from_branch(
-    logical: LogicalChapter, row: dict[str, Any], branch: dict[str, Any] | None
+    logical: LogicalChapter,
+    row: dict[str, Any],
+    branch: dict[str, Any] | None,
+    *,
+    is_default_branch: bool = False,
 ) -> ChapterBranchVariant:
     return ChapterBranchVariant(
         external_chapter_id=_branch_first(row, branch, "chapter_id", "chapterId", "id")
@@ -258,7 +279,22 @@ def _variant_from_branch(
         branch_user=_display(_branch_first(row, branch, "user", "creator")),
         published_at=_text(_branch_first(row, branch, "published_at", "publishedAt")),
         created_at=_text(_branch_first(row, branch, "created_at", "createdAt")),
+        is_default_branch=is_default_branch,
     )
+
+
+def _is_single_default_branch(
+    row: dict[str, Any],
+    branches: tuple[dict[str, Any] | None, ...],
+    branch: dict[str, Any] | None,
+) -> bool:
+    if branch is None or len(branches) != 1:
+        return False
+    if _branch_first(row, branch, "branch_id", "branchId") is not None:
+        return False
+    return _text(_branch_first(row, branch, "volume")) is not None and _text(
+        _branch_first(row, branch, "number")
+    ) is not None
 
 
 def _branch_first(row: dict[str, Any], branch: dict[str, Any] | None, *keys: str) -> Any:
@@ -302,7 +338,7 @@ def _display(value: Any) -> str | None:
         names = [_display(item) for item in value]
         return ", ".join(name for name in names if name) or None
     if isinstance(value, dict):
-        return _text(_first(value, "name", "title", "username", "login"))
+        return _text(_first(value, "name", "title", "username", "login", "slug"))
     return _text(value)
 
 
