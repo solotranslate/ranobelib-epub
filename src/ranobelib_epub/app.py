@@ -127,8 +127,8 @@ def index() -> str:
   <main class="card">
     <h1>RanobeLib EPUB Builder</h1>
     <p class="muted">
-      Вставьте публичную ссылку на тайтл RanobeLib, чтобы посмотреть read-only preview
-      доступных глав и веток перед будущей сборкой EPUB.
+      Вставьте публичную ссылку на тайтл RanobeLib (/book/ или /manga/), чтобы посмотреть
+      read-only preview доступных глав и веток перед будущей сборкой EPUB.
     </p>
 
     <form action="/inventory" method="get">
