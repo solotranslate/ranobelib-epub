@@ -145,8 +145,14 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert "Logical chapters</dt><dd>2" in response.text
     assert "Variants</dt><dd>2" in response.text
     assert "Buildable variants</dt><dd>1" in response.text
-    assert "Volume 1 Chapter 2: Two roads — Team A" in response.text
-    assert "buildable" in response.text
+    assert "Branch cards" in response.text
+    assert "Team A" in response.text
+    assert "Branch ID: 55" in response.text
+    assert "Buildable chapters: 1" in response.text
+    assert "Volume range: 1–1" in response.text
+    assert "Chapter range: 2–2" in response.text
+    assert "Volume 1" in response.text
+    assert "Two roads" in response.text
     assert 'action="/build"' in response.text
     assert 'method="post"' in response.text
     assert 'name="title_url"' in response.text
@@ -157,20 +163,25 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert 'name="team"' in response.text
     assert 'name="language"' in response.text
     assert 'value="ru"' in response.text
-    assert "Images / Assets" in response.text
+    assert "Build settings" in response.text
     assert 'name="include_images"' in response.text
     assert 'name="include_images" value="true" checked' not in response.text
-    assert "Images are fetched read-only during this build only, bounded by limits, not cached/stored." in response.text
+    assert "Images can make the build slower and the EPUB larger." in response.text
     assert 'name="selected_variant"' in response.text
-    assert response.text.count('name="selected_variant"') == 1
+    assert response.text.count('<input type="checkbox" name="selected_variant"') == 1
     assert "non-buildable" in response.text
     assert "not selectable" in response.text
     assert "Chapter branch variant is not buildable" in response.text
     assert f"Synchronous build limit</dt><dd>{MAX_SYNC_BUILD_VARIANTS} variants" in response.text
     assert f"Current synchronous build limit: {MAX_SYNC_BUILD_VARIANTS}" in response.text
+    assert "Apply range inside this branch" in response.text
+    assert "Build this branch/range" in response.text
+    assert "Build checked chapters" in response.text
+    assert "Building EPUB…" in response.text
+    assert "Fetching selected chapters and optional images, then packaging EPUB. Keep this tab open." in response.text
     assert "use branch/range filters or split the title into multiple EPUB files" in response.text
-    assert "background" not in response.text.lower()
-    assert "queue" not in response.text.lower()
+    assert "background worker" not in response.text.lower()
+    assert "progress polling" not in response.text.lower()
 
 
 def test_inventory_preview_rejects_invalid_url_without_fetching() -> None:
@@ -461,7 +472,7 @@ def test_build_route_rejects_invalid_title_url_without_stack_trace() -> None:
     assert service.calls == []
 
 
-def test_inventory_preview_renders_bulk_branch_and_range_controls() -> None:
+def test_inventory_preview_renders_branch_card_range_controls() -> None:
     service = FakeInventoryService()
     app.dependency_overrides[get_inventory_service] = lambda: service
     client = TestClient(app)
@@ -474,11 +485,13 @@ def test_inventory_preview_renders_bulk_branch_and_range_controls() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert "Bulk selection controls" in response.text
+    assert "Apply range inside this branch" in response.text
     assert 'name="bulk_variant"' in response.text
     assert response.text.count('name="bulk_variant"') == 1
     assert 'name="bulk_branch_id"' in response.text
-    assert "Team A (55)" in response.text
+    assert 'value="55"' in response.text
+    assert "Team A" in response.text
+    assert "Branch ID: 55" in response.text
     assert 'name="volume_from"' in response.text
     assert 'name="volume_to"' in response.text
     assert 'name="chapter_from"' in response.text
@@ -511,6 +524,94 @@ def test_build_route_accepts_bulk_payload_when_no_manual_checkbox_selected() -> 
     assert response.status_code == 200
     _, _, variants, include_images = service.calls[0]
     assert [variant.external_chapter_id for variant in variants] == [102]
+    assert include_images is False
+
+
+def test_build_route_checked_mode_uses_selected_variants() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": _variant_payload(
+                    external_chapter_id=201, branch_id=55, number="7"
+                ),
+                "bulk_variant": _variant_payload(
+                    external_chapter_id=202, branch_id=55, number="8"
+                ),
+                "selection_mode": "checked",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert len(service.calls) == 1
+    _, _, variants, include_images = service.calls[0]
+    assert [variant.external_chapter_id for variant in variants] == [201]
+    assert include_images is False
+
+
+def test_build_route_checked_mode_rejects_empty_selection_before_build_service() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "bulk_variant": _variant_payload(
+                    external_chapter_id=202, branch_id=55, number="8"
+                ),
+                "selection_mode": "checked",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert "Select at least one checked chapter variant" in response.text
+    assert "Traceback" not in response.text
+    assert service.calls == []
+
+
+def test_build_route_range_mode_uses_bulk_range_and_ignores_checked_variants() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": _variant_payload(
+                    external_chapter_id=999, branch_id=55, number="99"
+                ),
+                "bulk_variant": [
+                    _variant_payload(external_chapter_id=301, branch_id=55, number="1"),
+                    _variant_payload(external_chapter_id=302, branch_id=55, number="2"),
+                    _variant_payload(external_chapter_id=303, branch_id=66, number="2"),
+                ],
+                "bulk_branch_id": "55",
+                "chapter_from": "2",
+                "chapter_to": "2",
+                "selection_mode": "range",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert len(service.calls) == 1
+    _, _, variants, include_images = service.calls[0]
+    assert [variant.external_chapter_id for variant in variants] == [302]
     assert include_images is False
 
 
