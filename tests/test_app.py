@@ -2,7 +2,12 @@ import json
 
 from fastapi.testclient import TestClient
 
-from ranobelib_epub.app import app, get_build_service, get_inventory_service
+from ranobelib_epub.app import (
+    MAX_SYNC_BUILD_VARIANTS,
+    app,
+    get_build_service,
+    get_inventory_service,
+)
 from ranobelib_epub.epub import BookMetadata
 from ranobelib_epub.inventory import (
     ChapterBranchVariant,
@@ -155,6 +160,11 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert "non-buildable" in response.text
     assert "not selectable" in response.text
     assert "Chapter branch variant is not buildable" in response.text
+    assert f"Synchronous build limit</dt><dd>{MAX_SYNC_BUILD_VARIANTS} variants" in response.text
+    assert f"Current synchronous build limit: {MAX_SYNC_BUILD_VARIANTS}" in response.text
+    assert "use branch/range filters or split the title into multiple EPUB files" in response.text
+    assert "background" not in response.text.lower()
+    assert "queue" not in response.text.lower()
 
 
 def test_inventory_preview_rejects_invalid_url_without_fetching() -> None:
@@ -537,3 +547,99 @@ def test_build_route_rejects_malformed_bulk_payload_before_build_service() -> No
     assert response.status_code == 400
     assert "Bulk variant at position 1 is malformed" in response.text
     assert service.calls == []
+
+
+def _variant_payloads(count: int) -> list[str]:
+    return [
+        _variant_payload(external_chapter_id=1000 + index, branch_id=55, number=str(index))
+        for index in range(1, count + 1)
+    ]
+
+
+def test_build_route_rejects_manual_selection_over_sync_limit_before_build_service() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": _variant_payloads(MAX_SYNC_BUILD_VARIANTS + 1),
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert f"contains {MAX_SYNC_BUILD_VARIANTS + 1} chapter variants" in response.text
+    assert f"configured maximum is {MAX_SYNC_BUILD_VARIANTS}" in response.text
+    assert service.calls == []
+
+
+def test_build_route_rejects_bulk_selection_over_sync_limit_before_build_service() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "bulk_variant": _variant_payloads(MAX_SYNC_BUILD_VARIANTS + 1),
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert f"contains {MAX_SYNC_BUILD_VARIANTS + 1} chapter variants" in response.text
+    assert f"configured maximum is {MAX_SYNC_BUILD_VARIANTS}" in response.text
+    assert service.calls == []
+
+
+def test_build_route_accepts_selection_exactly_at_sync_limit() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": _variant_payloads(MAX_SYNC_BUILD_VARIANTS),
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert len(service.calls) == 1
+    _, _, variants = service.calls[0]
+    assert len(variants) == MAX_SYNC_BUILD_VARIANTS
+
+
+def test_build_route_dedupes_before_sync_limit_check() -> None:
+    service = FakeBuildService()
+    app.dependency_overrides[get_build_service] = lambda: service
+    client = TestClient(app)
+    duplicated_payload = _variant_payload(external_chapter_id=101, branch_id=55, number="1")
+
+    try:
+        response = client.post(
+            "/build",
+            data={
+                "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
+                "selected_variant": [duplicated_payload] * (MAX_SYNC_BUILD_VARIANTS + 1),
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert len(service.calls) == 1
+    _, _, variants = service.calls[0]
+    assert len(variants) == 1

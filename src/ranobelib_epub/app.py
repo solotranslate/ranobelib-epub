@@ -15,6 +15,7 @@ from ranobelib_epub.inventory import ChapterBranchVariant, HttpxInventoryTranspo
 from ranobelib_epub.ranobelib import RanobeLibTitleUrl, parse_title_url
 
 app = FastAPI(title="RanobeLib EPUB Builder")
+MAX_SYNC_BUILD_VARIANTS = 100
 _SAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 
@@ -261,9 +262,10 @@ def _selected_variants(
     chapter_from: str | None = None,
     chapter_to: str | None = None,
 ) -> tuple[ChapterBranchVariant, ...]:
+    selected: tuple[ChapterBranchVariant, ...]
     if raw_variants:
-        return _dedupe_variants(_parse_variant_values(raw_variants, source="Selected variant"))
-    if bulk_variants:
+        selected = _dedupe_variants(_parse_variant_values(raw_variants, source="Selected variant"))
+    elif bulk_variants:
         candidates = _parse_variant_values(bulk_variants, source="Bulk variant")
         variants = _filter_bulk_variants(
             candidates,
@@ -275,8 +277,23 @@ def _selected_variants(
         )
         if not variants:
             raise ValueError("Bulk selection did not match any buildable chapter variants")
-        return _dedupe_variants(variants)
-    raise ValueError("Select at least one buildable chapter variant")
+        selected = _dedupe_variants(variants)
+    else:
+        raise ValueError("Select at least one buildable chapter variant")
+
+    _enforce_sync_build_limit(selected)
+    return selected
+
+
+def _enforce_sync_build_limit(variants: tuple[ChapterBranchVariant, ...]) -> None:
+    selected_count = len(variants)
+    if selected_count > MAX_SYNC_BUILD_VARIANTS:
+        raise ValueError(
+            "Synchronous build selection contains "
+            f"{selected_count} chapter variants, but the configured maximum is "
+            f"{MAX_SYNC_BUILD_VARIANTS}. Use branch/range filters or split large titles "
+            "into multiple EPUB builds."
+        )
 
 
 def _parse_variant_values(raw_variants: list[str], *, source: str) -> tuple[ChapterBranchVariant, ...]:
@@ -481,7 +498,13 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
       <dt>Logical chapters</dt><dd>{len(inventory.logical_chapters)}</dd>
       <dt>Variants</dt><dd>{len(inventory.variants)}</dd>
       <dt>Buildable variants</dt><dd>{len(inventory.buildable_variants)}</dd>
+      <dt>Synchronous build limit</dt><dd>{MAX_SYNC_BUILD_VARIANTS} variants</dd>
     </dl>
+    <aside class="operator-note">
+      <h2>Operator note</h2>
+      <p>Current synchronous build limit: {MAX_SYNC_BUILD_VARIANTS} chapter variants per EPUB build.</p>
+      <p>For larger titles, use branch/range filters or split the title into multiple EPUB files.</p>
+    </aside>
     <h2>Variants</h2>
     <form action="/build" method="post">
       <input type="hidden" name="title_url" value="{escape(title.canonical_url, quote=True)}">
