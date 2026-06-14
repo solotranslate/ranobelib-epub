@@ -147,11 +147,25 @@ def inventory_preview(
 def build_epub_download(
     title_url: Annotated[str, Form(min_length=1)],
     selected_variant: Annotated[list[str] | None, Form()] = None,
+    bulk_variant: Annotated[list[str] | None, Form()] = None,
+    bulk_branch_id: Annotated[str | None, Form()] = None,
+    volume_from: Annotated[str | None, Form()] = None,
+    volume_to: Annotated[str | None, Form()] = None,
+    chapter_from: Annotated[str | None, Form()] = None,
+    chapter_to: Annotated[str | None, Form()] = None,
     service: BuildService = Depends(get_build_service),
 ) -> Response:
     try:
         title = parse_title_url(title_url)
-        variants = _selected_variants(selected_variant or [])
+        variants = _selected_variants(
+            selected_variant or [],
+            bulk_variant or [],
+            bulk_branch_id=bulk_branch_id,
+            volume_from=volume_from,
+            volume_to=volume_to,
+            chapter_from=chapter_from,
+            chapter_to=chapter_to,
+        )
     except ValueError as exc:
         return _error_page(str(exc), status_code=400)
 
@@ -185,27 +199,137 @@ def _error_page(message: str, *, status_code: int) -> HTMLResponse:
     return HTMLResponse(html, status_code=status_code)
 
 
-def _selected_variants(raw_variants: list[str]) -> tuple[ChapterBranchVariant, ...]:
-    if not raw_variants:
-        raise ValueError("Select at least one buildable chapter variant")
+def _selected_variants(
+    raw_variants: list[str],
+    bulk_variants: list[str] | None = None,
+    *,
+    bulk_branch_id: str | None = None,
+    volume_from: str | None = None,
+    volume_to: str | None = None,
+    chapter_from: str | None = None,
+    chapter_to: str | None = None,
+) -> tuple[ChapterBranchVariant, ...]:
+    if raw_variants:
+        return _dedupe_variants(_parse_variant_values(raw_variants, source="Selected variant"))
+    if bulk_variants:
+        candidates = _parse_variant_values(bulk_variants, source="Bulk variant")
+        variants = _filter_bulk_variants(
+            candidates,
+            bulk_branch_id=bulk_branch_id,
+            volume_from=volume_from,
+            volume_to=volume_to,
+            chapter_from=chapter_from,
+            chapter_to=chapter_to,
+        )
+        if not variants:
+            raise ValueError("Bulk selection did not match any buildable chapter variants")
+        return _dedupe_variants(variants)
+    raise ValueError("Select at least one buildable chapter variant")
 
+
+def _parse_variant_values(raw_variants: list[str], *, source: str) -> tuple[ChapterBranchVariant, ...]:
     variants: list[ChapterBranchVariant] = []
     for index, raw_variant in enumerate(raw_variants, start=1):
         try:
             payload = json.loads(raw_variant)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"Selected variant at position {index} is malformed") from exc
+            raise ValueError(f"{source} at position {index} is malformed") from exc
         if not isinstance(payload, dict):
-            raise ValueError(f"Selected variant at position {index} is malformed")
+            raise ValueError(f"{source} at position {index} is malformed")
 
-        variant = _variant_from_form_payload(payload, index)
+        variant = _variant_from_form_payload(payload, index, source=source)
         if not variant.is_buildable:
-            raise ValueError(f"Selected variant at position {index} is not buildable")
+            raise ValueError(f"{source} at position {index} is not buildable")
         variants.append(variant)
     return tuple(variants)
 
 
-def _variant_from_form_payload(payload: dict[str, Any], index: int) -> ChapterBranchVariant:
+def _filter_bulk_variants(
+    variants: tuple[ChapterBranchVariant, ...],
+    *,
+    bulk_branch_id: str | None,
+    volume_from: str | None,
+    volume_to: str | None,
+    chapter_from: str | None,
+    chapter_to: str | None,
+) -> tuple[ChapterBranchVariant, ...]:
+    branch = _optional_text(bulk_branch_id)
+    vol_min = _optional_number(volume_from, "Volume from")
+    vol_max = _optional_number(volume_to, "Volume to")
+    ch_min = _optional_number(chapter_from, "Chapter from")
+    ch_max = _optional_number(chapter_to, "Chapter to")
+    if vol_min is not None and vol_max is not None and vol_min > vol_max:
+        raise ValueError("Volume range start must be less than or equal to range end")
+    if ch_min is not None and ch_max is not None and ch_min > ch_max:
+        raise ValueError("Chapter range start must be less than or equal to range end")
+
+    selected: list[ChapterBranchVariant] = []
+    for variant in variants:
+        if branch and str(variant.branch_id) != branch:
+            continue
+        if not _in_range(variant.volume, vol_min, vol_max):
+            continue
+        if not _in_range(variant.number, ch_min, ch_max):
+            continue
+        selected.append(variant)
+    return tuple(selected)
+
+
+def _in_range(value: str | None, minimum: float | None, maximum: float | None) -> bool:
+    if minimum is None and maximum is None:
+        return True
+    parsed = _parse_number(value)
+    if parsed is None:
+        return False
+    if minimum is not None and parsed < minimum:
+        return False
+    if maximum is not None and parsed > maximum:
+        return False
+    return True
+
+
+def _optional_number(value: str | None, label: str) -> float | None:
+    text = _optional_text(value)
+    if text is None:
+        return None
+    parsed = _parse_number(text)
+    if parsed is None:
+        raise ValueError(f"{label} must be a number")
+    return parsed
+
+
+def _parse_number(value: str | None) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip().replace(",", ".")
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _dedupe_variants(variants: tuple[ChapterBranchVariant, ...]) -> tuple[ChapterBranchVariant, ...]:
+    deduped: list[ChapterBranchVariant] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for variant in variants:
+        key = (
+            str(variant.external_chapter_id),
+            str(variant.branch_id),
+            str(variant.volume),
+            str(variant.number),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(variant)
+    return tuple(deduped)
+
+
+def _variant_from_form_payload(
+    payload: dict[str, Any], index: int, *, source: str = "Selected variant"
+) -> ChapterBranchVariant:
     allowed = {
         "external_chapter_id",
         "branch_id",
@@ -219,7 +343,7 @@ def _variant_from_form_payload(payload: dict[str, Any], index: int) -> ChapterBr
         "created_at",
     }
     if any(key not in allowed for key in payload):
-        raise ValueError(f"Selected variant at position {index} is malformed")
+        raise ValueError(f"{source} at position {index} is malformed")
     return ChapterBranchVariant(
         external_chapter_id=payload.get("external_chapter_id"),
         branch_id=payload.get("branch_id"),
@@ -267,10 +391,17 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
         "<tr>"
         f"<td>{_variant_selector(variant)}</td>"
         f"<td>{escape(str(variant.branch_id or '—'))}</td>"
+        f"<td>{escape(str(variant.volume or '—'))}</td>"
+        f"<td>{escape(str(variant.number or '—'))}</td>"
         f"<td>{'buildable' if variant.is_buildable else 'non-buildable'}</td>"
         "</tr>"
         for variant in inventory.variants
-    ) or '<tr><td colspan="3">No variants found</td></tr>'
+    ) or '<tr><td colspan="5">No variants found</td></tr>'
+    bulk_values = "\n".join(
+        f'<input type="hidden" name="bulk_variant" value="{escape(_variant_form_value(variant), quote=True)}">'
+        for variant in inventory.buildable_variants
+    )
+    bulk_controls = _bulk_controls(inventory)
     warning_items = "\n".join(
         f"<li>{escape(warning.message)}"
         f" (logical: {escape(str(warning.logical_id))}, variant: {escape(str(warning.variant_id))})</li>"
@@ -302,8 +433,10 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
     <h2>Variants</h2>
     <form action="/build" method="post">
       <input type="hidden" name="title_url" value="{escape(title.canonical_url, quote=True)}">
+      {bulk_values}
+      {bulk_controls}
       <table>
-        <thead><tr><th>display_label</th><th>branch_id</th><th>status</th></tr></thead>
+        <thead><tr><th>display_label</th><th>branch_id</th><th>volume</th><th>chapter</th><th>status</th></tr></thead>
         <tbody>{variant_rows}</tbody>
       </table>
       {build_button}
@@ -314,6 +447,42 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
 </body>
 </html>
 """
+
+
+def _bulk_controls(inventory: ChapterInventory) -> str:
+    buildable = inventory.buildable_variants
+    if not buildable:
+        return ""
+    branch_options = "\n".join(
+        f'<option value="{escape(str(branch_id), quote=True)}">{escape(label)}</option>'
+        for branch_id, label in _branch_options(buildable)
+    )
+    return f"""
+      <fieldset>
+        <legend>Bulk selection controls</legend>
+        <p class="muted">If no manual checkbox is selected, build all buildable variants matching this branch and range.</p>
+        <label for="bulk_branch_id">Branch/team</label>
+        <select id="bulk_branch_id" name="bulk_branch_id">
+          <option value="">All buildable branches</option>
+          {branch_options}
+        </select>
+        <label>Volume range <input name="volume_from" inputmode="decimal" placeholder="from"> <input name="volume_to" inputmode="decimal" placeholder="to"></label>
+        <label>Chapter range <input name="chapter_from" inputmode="decimal" placeholder="from"> <input name="chapter_to" inputmode="decimal" placeholder="to"></label>
+      </fieldset>
+    """
+
+
+def _branch_options(variants: tuple[ChapterBranchVariant, ...]) -> tuple[tuple[str, str], ...]:
+    options: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for variant in variants:
+        branch_id = str(variant.branch_id)
+        if branch_id in seen:
+            continue
+        seen.add(branch_id)
+        name = variant.branch_team or variant.branch_user or f"Branch {branch_id}"
+        options.append((branch_id, f"{name} ({branch_id})"))
+    return tuple(options)
 
 
 def _variant_selector(variant: ChapterBranchVariant) -> str:
