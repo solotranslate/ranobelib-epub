@@ -59,6 +59,10 @@ class BuildableChapterVariant(ChapterBranchVariant):
     volume: str
     number: str
 
+    def __post_init__(self) -> None:
+        if self.branch_id is None and not self.is_default_branch:
+            raise ValueError("Buildable default branch variants must be marked explicitly")
+
 
 @dataclass(frozen=True, slots=True)
 class LogicalChapter:

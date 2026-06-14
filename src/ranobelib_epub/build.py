@@ -98,7 +98,7 @@ def _validate_selection(
         buildable.append(
             BuildableChapterVariant(
                 external_chapter_id=variant.external_chapter_id,
-                branch_id=cast(int | str, variant.branch_id),
+                branch_id=cast(int | str | None, variant.branch_id),
                 volume=cast(str, variant.volume),
                 number=cast(str, variant.number),
                 number_secondary=variant.number_secondary,
@@ -107,6 +107,7 @@ def _validate_selection(
                 branch_user=variant.branch_user,
                 published_at=variant.published_at,
                 created_at=variant.created_at,
+                is_default_branch=variant.is_default_branch,
             )
         )
     return tuple(buildable)

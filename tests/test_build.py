@@ -46,6 +46,35 @@ def test_build_selected_chapter_epub_preserves_selection_order() -> None:
     ]
 
 
+def test_build_selected_chapter_epub_preserves_default_branch_through_orchestration() -> None:
+    transport = FakeTransport([_payload(4163383, "1", "Default branch content")])
+    variant = ChapterBranchVariant(
+        external_chapter_id=4163383,
+        branch_id=None,
+        volume="1",
+        number="1",
+        number_secondary=None,
+        chapter_title="Default branch",
+        branch_team="solotranslating",
+        is_default_branch=True,
+    )
+
+    result = build_selected_chapter_epub(
+        "default-title",
+        BookMetadata(title="Demo"),
+        [variant],
+        transport,
+        base_url="https://api.test",
+    )
+
+    assert result.epub_bytes
+    assert len(result.chapters) == 1
+    assert [request.url for request in result.request_plans] == [
+        "https://api.test/api/manga/default-title/chapter?number=1&volume=1"
+    ]
+    assert transport.requests == list(result.request_plans)
+
+
 def test_build_selected_chapter_epub_rejects_non_buildable_before_transport_call() -> None:
     transport = FakeTransport([_payload(1, "1", "First")])
     variants = [_variant(10, "1"), ChapterBranchVariant(2, None, "1", "2", None, "Broken")]
