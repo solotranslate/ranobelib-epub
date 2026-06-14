@@ -92,6 +92,7 @@ def collect_image_assets(
     limits: ImageFetchLimits | None = None,
     *,
     progress_callback: Callable[..., None] | None = None,
+    cancellation_check: Callable[[], None] | None = None,
 ) -> tuple[dict[str, ImageAsset], tuple[str, ...]]:
     """Fetch bounded in-memory image assets referenced by normalized image blocks."""
 
@@ -106,6 +107,8 @@ def collect_image_assets(
 
     image_current = 0
     for image in images:
+        if cancellation_check is not None:
+            cancellation_check()
         source_url = image_source_url(image)
         image_name = image.name or image.alt or source_url or "unknown image"
         if not source_url:
@@ -128,6 +131,8 @@ def collect_image_assets(
             )
         try:
             content, media_type = fetcher.fetch_image(source_url, active_limits)
+            if cancellation_check is not None:
+                cancellation_check()
         except Exception as exc:  # noqa: BLE001 - preserve non-strict build behavior.
             warnings.append(f"Image block {image_name!r} skipped: {exc}")
             continue

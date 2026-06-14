@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass, replace
 from typing import Callable, Literal, Protocol
 
+from ranobelib_epub.build import BuildCancelledError
 from ranobelib_epub.epub import BookMetadata
 from ranobelib_epub.inventory import ChapterBranchVariant
 from ranobelib_epub.ranobelib import RanobeLibTitleUrl
@@ -18,6 +19,7 @@ JobStatus = Literal[
     "building_epub",
     "ready",
     "failed",
+    "cancelled",
 ]
 
 
@@ -30,6 +32,7 @@ class ProgressBuildService(Protocol):
         *,
         include_images: bool = False,
         progress_callback: Callable[..., None] | None = None,
+        cancellation_check: Callable[[], None] | None = None,
     ) -> bytes: ...
 
 
@@ -89,6 +92,7 @@ class BuildJobManager:
         self._clock = clock
         self._lock = threading.Lock()
         self._jobs: dict[str, BuildJobSnapshot] = {}
+        self._cancel_events: dict[str, threading.Event] = {}
 
     def start(self, request: BuildJobRequest, service: ProgressBuildService) -> str:
         with self._lock:
@@ -99,6 +103,8 @@ class BuildJobManager:
                 )
             now = self._clock()
             job_id = uuid.uuid4().hex
+            cancel_event = threading.Event()
+            self._cancel_events[job_id] = cancel_event
             self._jobs[job_id] = BuildJobSnapshot(
                 job_id=job_id,
                 status="queued",
@@ -109,7 +115,7 @@ class BuildJobManager:
             )
         thread = threading.Thread(
             target=self._run_job,
-            args=(job_id, request, service),
+            args=(job_id, request, service, cancel_event),
             name=f"epub-build-{job_id[:8]}",
             daemon=True,
         )
@@ -121,22 +127,58 @@ class BuildJobManager:
             self.cleanup()
             return self._jobs.get(job_id)
 
+    def cancel(self, job_id: str) -> tuple[BuildJobSnapshot | None, str, int]:
+        with self._lock:
+            self.cleanup()
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None, "Задача сборки не найдена или устарела.", 404
+            if job.status == "cancelled":
+                return job, "Сборка уже остановлена.", 409
+            if job.status == "ready":
+                return job, "Сборка уже завершена, остановка невозможна.", 409
+            if job.status == "failed":
+                return job, "Сборка уже завершилась ошибкой, остановка невозможна.", 409
+            event = self._cancel_events.get(job_id)
+            if event is not None:
+                event.set()
+            cancelled = replace(
+                job,
+                status="cancelled",
+                message="Сборка остановлена.",
+                updated_at=self._clock(),
+                epub_bytes=None,
+                error=None,
+            )
+            self._jobs[job_id] = cancelled
+            return cancelled, "Сборка остановлена.", 200
+
     def cleanup(self) -> None:
         now = self._clock()
         expired: list[str] = []
         for job_id, job in self._jobs.items():
-            if job.status in {"ready", "failed"}:
+            if job.status in {"ready", "failed", "cancelled"}:
                 if now - job.updated_at > self.completed_ttl_seconds:
                     expired.append(job_id)
             elif now - job.updated_at > self.running_timeout_seconds:
                 expired.append(job_id)
         for job_id in expired:
             self._jobs.pop(job_id, None)
+            self._cancel_events.pop(job_id, None)
 
     def _run_job(
-        self, job_id: str, request: BuildJobRequest, service: ProgressBuildService
+        self,
+        job_id: str,
+        request: BuildJobRequest,
+        service: ProgressBuildService,
+        cancel_event: threading.Event,
     ) -> None:
+        def ensure_not_cancelled() -> None:
+            if cancel_event.is_set():
+                raise BuildCancelledError("Сборка остановлена.")
+
         def progress(status: JobStatus, **updates: object) -> None:
+            ensure_not_cancelled()
             self.update(job_id, status=status, **updates)
 
         try:
@@ -147,14 +189,33 @@ class BuildJobManager:
                 request.variants,
                 include_images=request.include_images,
                 progress_callback=progress,
+                cancellation_check=ensure_not_cancelled,
             )
+            ensure_not_cancelled()
             self.update(
                 job_id,
                 status="ready",
                 message="EPUB готов к скачиванию.",
                 epub_bytes=epub_bytes,
             )
+        except BuildCancelledError:
+            self.update(
+                job_id,
+                status="cancelled",
+                message="Сборка остановлена.",
+                epub_bytes=None,
+                error=None,
+            )
         except Exception as exc:  # noqa: BLE001 - background job must return controlled status.
+            if cancel_event.is_set():
+                self.update(
+                    job_id,
+                    status="cancelled",
+                    message="Сборка остановлена.",
+                    epub_bytes=None,
+                    error=None,
+                )
+                return
             self.update(
                 job_id,
                 status="failed",
@@ -183,6 +244,8 @@ class BuildJobManager:
 
     def _active_count_locked(self) -> int:
         return sum(
-            1 for job in self._jobs.values() if job.status not in {"ready", "failed"}
+            1
+            for job in self._jobs.values()
+            if job.status not in {"ready", "failed", "cancelled"}
         )
 
