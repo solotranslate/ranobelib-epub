@@ -258,3 +258,53 @@ def test_normalize_chapter_payload_preserves_image_meta_url_fallbacks() -> None:
     assert isinstance(original_image, Image)
     assert preview_image.src == "/uploads/preview.jpg"
     assert original_image.src == "/uploads/original.jpg"
+
+
+def test_generated_title_hides_default_secondary_number() -> None:
+    chapter = normalize_chapter_payload(
+        {
+            "data": {
+                "volume": "1",
+                "number": "3",
+                "number_secondary": "1",
+                "content": {"type": "doc", "content": []},
+            }
+        }
+    )
+
+    assert chapter.generated_title == "Volume 1 Chapter 3"
+    assert chapter.toc_title == "Volume 1 Chapter 3"
+
+
+def test_source_title_wins_over_generated_title_with_default_secondary() -> None:
+    chapter = normalize_chapter_payload(
+        {
+            "data": {
+                "volume": "1",
+                "number": "3",
+                "number_secondary": "1",
+                "title": "Real chapter title",
+                "content": {"type": "doc", "content": []},
+            }
+        }
+    )
+
+    assert chapter.generated_title == "Volume 1 Chapter 3"
+    assert chapter.toc_title == "Real chapter title"
+
+
+def test_source_name_wins_over_generated_title_with_default_secondary() -> None:
+    chapter = normalize_chapter_payload(
+        {
+            "data": {
+                "volume": "1",
+                "number": "3",
+                "number_secondary": "1.0",
+                "name": "Real chapter name",
+                "content": {"type": "doc", "content": []},
+            }
+        }
+    )
+
+    assert chapter.generated_title == "Volume 1 Chapter 3"
+    assert chapter.toc_title == "Real chapter name"

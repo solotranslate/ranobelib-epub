@@ -16,6 +16,7 @@ from ranobelib_epub.content import (
     Paragraph,
     TextMark,
     TextRun,
+    normalize_chapter_payload,
 )
 from ranobelib_epub.epub import BookMetadata, build_epub, build_epub_bytes, write_epub
 
@@ -39,6 +40,34 @@ def test_build_epub_bytes_uses_deterministic_toc_and_filenames() -> None:
         nav = archive.read("EPUB/nav.xhtml").decode("utf-8")
         assert "Free form !? title" in nav
         assert "Named TOC" in nav
+
+
+def test_build_epub_nav_fallback_hides_default_secondary_number() -> None:
+    chapter = normalize_chapter_payload(
+        {
+            "data": {
+                "volume": "1",
+                "number": "3",
+                "number_secondary": "1",
+                "content": {
+                    "type": "doc",
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [{"type": "text", "text": "Text"}],
+                        }
+                    ],
+                },
+            }
+        }
+    )
+
+    payload = build_epub_bytes(BookMetadata(title="Book"), [chapter])
+
+    with ZipFile(BytesIO(payload)) as archive:
+        nav = archive.read("EPUB/nav.xhtml").decode("utf-8")
+        assert "Volume 1 Chapter 3" in nav
+        assert "Volume 1 Chapter 3.1" not in nav
 
 
 def test_build_epub_renders_supported_blocks_and_marks() -> None:

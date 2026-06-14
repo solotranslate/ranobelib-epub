@@ -6,6 +6,8 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
+from ranobelib_epub.display_numbering import display_chapter_number
+
 RANOBELIB_API_BASE_URL = "https://api.cdnlibs.org"
 INVENTORY_HEADERS = {"Accept": "application/json", "Site-Id": "3"}
 _FORBIDDEN_HEADER_PARTS = ("authorization", "cookie", "token", "session")
@@ -327,8 +329,9 @@ def _chapter_label(
     parts: list[str] = []
     if volume:
         parts.append(f"Volume {volume}")
-    if number:
-        parts.append(f"Chapter {number}{'.' + secondary if secondary else ''}")
+    chapter_number = display_chapter_number(number, secondary)
+    if chapter_number:
+        parts.append(f"Chapter {chapter_number}")
     base = " ".join(parts) if parts else "Chapter"
     return f"{base}: {title}" if title else base
 
