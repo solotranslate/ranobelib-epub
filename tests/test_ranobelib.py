@@ -17,14 +17,39 @@ def test_parse_title_url_without_locale() -> None:
     assert parsed.canonical_url == "https://ranobelib.me/book/987--another-title"
 
 
+def test_parse_title_url_accepts_manga_with_locale_and_preserves_canonical_path() -> None:
+    parsed = parse_title_url("https://ranobelib.me/ru/manga/264055--the-shut-in-apothecary-slime")
+
+    assert parsed.title_id == 264055
+    assert parsed.slug == "the-shut-in-apothecary-slime"
+    assert parsed.locale == "ru"
+    assert parsed.path_kind == "manga"
+    assert (
+        parsed.canonical_url
+        == "https://ranobelib.me/ru/manga/264055--the-shut-in-apothecary-slime"
+    )
+
+
+def test_parse_title_url_accepts_manga_without_locale() -> None:
+    parsed = parse_title_url("https://ranobelib.me/manga/264055--the-shut-in-apothecary-slime")
+
+    assert parsed == RanobeLibTitleUrl(
+        title_id=264055,
+        slug="the-shut-in-apothecary-slime",
+        locale=None,
+        path_kind="manga",
+    )
+    assert parsed.canonical_url == "https://ranobelib.me/manga/264055--the-shut-in-apothecary-slime"
+
+
 @pytest.mark.parametrize(
     "url",
     [
         "",
         "ftp://ranobelib.me/ru/book/12345--title-slug",
         "https://example.com/ru/book/12345--title-slug",
-        "https://ranobelib.me/ru/manga/12345--title-slug",
         "https://ranobelib.me/ru/book/12345--title-slug/v1/c1",
+        "https://ranobelib.me/ru/manga/12345--title-slug/v1/c1",
         "https://ranobelib.me/rus/book/12345--title-slug",
         "https://ranobelib.me/ru/book/not-a-number--title-slug",
         "https://ranobelib.me/ru/book/12345",

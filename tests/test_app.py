@@ -124,6 +124,8 @@ def test_index() -> None:
     assert "RanobeLib EPUB Builder" in response.text
     assert 'name="title_url"' in response.text
     assert 'action="/inventory"' in response.text
+    assert "/book/" in response.text
+    assert "/manga/" in response.text
 
 
 def test_inventory_preview_uses_fake_service_without_network() -> None:
@@ -192,6 +194,36 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert "use branch/range filters or split the title into multiple EPUB files" in response.text
     assert "background worker" not in response.text.lower()
     assert "progress polling" not in response.text.lower()
+
+
+def test_inventory_preview_accepts_manga_url_with_fake_service_without_network() -> None:
+    service = FakeInventoryService()
+    app.dependency_overrides[get_inventory_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/inventory",
+            params={
+                "title_url": "https://ranobelib.me/ru/manga/264055--the-shut-in-apothecary-slime"
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert service.seen == [
+        RanobeLibTitleUrl(
+            title_id=264055,
+            slug="the-shut-in-apothecary-slime",
+            locale="ru",
+            path_kind="manga",
+        )
+    ]
+    assert (
+        "https://ranobelib.me/ru/manga/264055--the-shut-in-apothecary-slime"
+        in response.text
+    )
 
 
 def test_inventory_preview_rejects_invalid_url_without_fetching() -> None:
