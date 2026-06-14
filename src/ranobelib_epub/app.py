@@ -823,13 +823,15 @@ def _inventory_page(
         if (readyLink) {{ readyLink.hidden = true; readyLink.removeAttribute('href'); }}
         if (submitter) {{ submitter.dataset.originalText = originalText; submitter.disabled = true; submitter.textContent = 'Собираю EPUB…'; }}
         form.classList.add('is-building');
+        let startedJobId = null;
         try {{
           const start = await fetch('/build-jobs', {{ method: 'POST', body, headers: {{'Accept': 'application/json'}} }});
           const payload = await start.json().catch(() => ({{message: 'Не удалось запустить сборку.'}}));
           if (start.status === 429 || start.status === 409) throw new Error(payload.message || busyMessage);
           if (!start.ok || !payload.job_id) throw new Error(payload.message || 'Не удалось запустить сборку.');
-          form.dataset.currentBuildJob = payload.job_id;
-          const downloadUrl = await pollJob(payload.job_id, form);
+          startedJobId = payload.job_id;
+          form.dataset.currentBuildJob = startedJobId;
+          const downloadUrl = await pollJob(startedJobId, form);
           if (!downloadUrl) {{
             const statusText = form.querySelector('[data-build-status-message]');
             if (statusText) statusText.textContent = 'Сборка остановлена.';
@@ -848,11 +850,14 @@ def _inventory_page(
           if (target) target.textContent = error.message || 'Сборка не удалась.';
           form.classList.add('has-build-error');
         }} finally {{
-          form.classList.remove('is-building');
-          delete form.dataset.currentBuildJob;
-          delete form.dataset.cancelRequested;
-          if (stopButton) {{ stopButton.disabled = false; stopButton.textContent = 'Остановить'; }}
-          if (submitter) {{ submitter.disabled = false; submitter.textContent = originalText; delete submitter.dataset.originalText; }}
+          const currentJobId = form.dataset.currentBuildJob;
+          if (!currentJobId || currentJobId === startedJobId) {{
+            form.classList.remove('is-building');
+            delete form.dataset.currentBuildJob;
+            delete form.dataset.cancelRequested;
+            if (stopButton) {{ stopButton.disabled = false; stopButton.textContent = 'Остановить'; }}
+            if (submitter) {{ submitter.disabled = false; submitter.textContent = originalText; delete submitter.dataset.originalText; }}
+          }}
         }}
       }});
       const stopButton = form.querySelector('[data-build-stop]');
@@ -870,15 +875,6 @@ def _inventory_page(
             const payload = await response.json().catch(() => ({{message: 'Не удалось остановить сборку.'}}));
             if (!response.ok) throw new Error(payload.message || 'Не удалось остановить сборку.');
             if (statusText) statusText.textContent = payload.message || 'Сборка остановлена.';
-            form.classList.remove('is-building');
-            delete form.dataset.currentBuildJob;
-            form.querySelectorAll('button[type="submit"]').forEach((button) => {{
-              button.disabled = false;
-              if (button.dataset.originalText !== undefined) {{
-                button.textContent = button.dataset.originalText;
-                delete button.dataset.originalText;
-              }}
-            }});
           }} catch (error) {{
             const target = form.querySelector('[data-build-error-message]');
             if (target) target.textContent = error.message || 'Не удалось остановить сборку.';

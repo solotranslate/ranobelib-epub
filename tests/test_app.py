@@ -1380,4 +1380,14 @@ def test_frontend_contains_stop_button_and_cancel_flow() -> None:
     assert "/cancel" in response.text
     assert "Останавливаю сборку…" in response.text
     assert "currentBuildJob" in response.text
+    assert "let startedJobId = null" in response.text
+    assert "currentJobId === startedJobId" in response.text
     assert "classList.remove('is-building')" in response.text
+
+    stop_handler = response.text.split("stopButton.addEventListener('click'", 1)[
+        1
+    ].split("const update = ()", 1)[0]
+    assert "form.dataset.cancelRequested = 'true'" in stop_handler
+    assert "fetch(`/build-jobs/${encodeURIComponent(jobId)}/cancel`" in stop_handler
+    assert "form.classList.remove('is-building')" not in stop_handler
+    assert 'form.querySelectorAll(\'button[type="submit"]\')' not in stop_handler
