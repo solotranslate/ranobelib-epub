@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from ranobelib_epub.chapter_client import (
+    ChapterContentResult as ChapterContentResult,
+    fetch_chapter_content as fetch_chapter_content,
+)
 from ranobelib_epub.content import (
     Attachment as Attachment,
     Blockquote as Blockquote,
