@@ -11,13 +11,13 @@ A small web service where a user can paste a public RanobeLib title URL, select 
 - No database.
 - No user accounts.
 - No persistent EPUB library.
-- No cookies, auth, sessions, or tokens.
-- No POST/PATCH/DELETE requests to RanobeLib.
 - No browser automation.
-- One active build at a time.
+- One active build at a time by default.
 - Runtime artifacts stay outside the repository.
 
 ## VPS operations
+
+The current VPS run mode uses a long-running `systemd` service on port `8080`.
 
 For VPS update, operation, smoke-check, troubleshooting, and safety-boundary guidance, see [docs/VPS_OPERATOR_RUNBOOK.md](docs/VPS_OPERATOR_RUNBOOK.md).
 
@@ -25,28 +25,36 @@ For VPS update, operation, smoke-check, troubleshooting, and safety-boundary gui
 
 Recommended VPS paths:
 
-- /srv/repos/ranobelib-epub
-- /var/lib/ranobelib-epub/tmp
-- /var/lib/ranobelib-epub/jobs
-- /var/log/ranobelib-epub
+- `/srv/repos/ranobelib-epub` — repository checkout.
+- `/srv/repos/ranobelib-epub/.venv` — Python virtual environment.
+
+Generated EPUBs, temporary files, logs, and other runtime artifacts should not be stored in the repository checkout.
 
 ## Local run
 
 Create and activate venv, then install dependencies:
 
-    python3 -m venv .venv
-    source .venv/bin/activate
-    pip install -r requirements-dev.txt
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+```
 
-Run the app:
+Run the app locally:
 
-    uvicorn ranobelib_epub.app:app --reload
+```sh
+uvicorn ranobelib_epub.app:app --host 127.0.0.1 --port 8080
+```
 
 Open:
 
-    http://127.0.0.1:8000/
+```text
+http://127.0.0.1:8080/
+```
 
 ## Checks
 
-    pytest
-    ruff check .
+```sh
+pytest
+ruff check .
+```
