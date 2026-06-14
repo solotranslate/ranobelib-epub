@@ -245,22 +245,28 @@ def _branches(row: dict[str, Any]) -> tuple[dict[str, Any] | None, ...]:
 def _variant_from_branch(
     logical: LogicalChapter, row: dict[str, Any], branch: dict[str, Any] | None
 ) -> ChapterBranchVariant:
-    source = branch or {}
     return ChapterBranchVariant(
-        external_chapter_id=_first(source, "chapter_id", "chapterId", "id") or logical.logical_id,
-        branch_id=_first(source, "branch_id", "branchId"),
-        volume=_text(_first(source, "volume")) or logical.volume,
-        number=_text(_first(source, "number")) or logical.number,
-        number_secondary=_text(_first(source, "number_secondary", "numberSecondary"))
+        external_chapter_id=_branch_first(row, branch, "chapter_id", "chapterId", "id")
+        or logical.logical_id,
+        branch_id=_branch_first(row, branch, "branch_id", "branchId"),
+        volume=_text(_branch_first(row, branch, "volume")) or logical.volume,
+        number=_text(_branch_first(row, branch, "number")) or logical.number,
+        number_secondary=_text(_branch_first(row, branch, "number_secondary", "numberSecondary"))
         or logical.number_secondary,
-        chapter_title=_text(_first(source, "name", "title")) or logical.name,
-        branch_team=_display(source.get("team") or source.get("teams") or source.get("branch")),
-        branch_user=_display(source.get("user") or source.get("creator")),
-        published_at=_text(_first(source, "published_at", "publishedAt"))
-        or _text(_first(row, "published_at", "publishedAt")),
-        created_at=_text(_first(source, "created_at", "createdAt"))
-        or _text(_first(row, "created_at", "createdAt")),
+        chapter_title=_text(_branch_first(row, branch, "name", "title")) or logical.name,
+        branch_team=_display(_branch_first(row, branch, "team", "teams", "branch")),
+        branch_user=_display(_branch_first(row, branch, "user", "creator")),
+        published_at=_text(_branch_first(row, branch, "published_at", "publishedAt")),
+        created_at=_text(_branch_first(row, branch, "created_at", "createdAt")),
     )
+
+
+def _branch_first(row: dict[str, Any], branch: dict[str, Any] | None, *keys: str) -> Any:
+    if branch is not None:
+        value = _first(branch, *keys)
+        if value is not None:
+            return value
+    return _first(row, *keys)
 
 
 def _replace_variants(
