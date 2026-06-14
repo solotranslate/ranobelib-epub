@@ -456,3 +456,29 @@ def test_title_detail_request_uses_public_get_with_safe_headers() -> None:
     assert request.url.startswith("https://api.example.test/api/manga/12345--demo-title?")
     assert "fields%5B%5D=eng_name" in request.url
     assert request.headers == {"Accept": "application/json", "Site-Id": "3"}
+
+
+def test_display_label_hides_default_secondary_for_unnamed_chapter() -> None:
+    variant = ChapterBranchVariant(
+        external_chapter_id=501,
+        branch_id=10,
+        volume="1",
+        number="3",
+        number_secondary="1",
+        chapter_title=None,
+    )
+
+    assert variant.display_label == "Volume 1 Chapter 3"
+
+
+def test_display_label_preserves_meaningful_secondary_for_unnamed_chapter() -> None:
+    variant = ChapterBranchVariant(
+        external_chapter_id=501,
+        branch_id=10,
+        volume=None,
+        number="3",
+        number_secondary="2",
+        chapter_title=None,
+    )
+
+    assert variant.display_label == "Chapter 3.2"

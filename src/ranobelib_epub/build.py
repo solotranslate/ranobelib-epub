@@ -13,6 +13,7 @@ from ranobelib_epub.content import (
     NormalizedChapter,
     Paragraph,
 )
+from ranobelib_epub.display_numbering import display_chapter_number
 from ranobelib_epub.epub import BookMetadata, build_epub_bytes
 from ranobelib_epub.images import ImageAssetFetcher, ImageFetchLimits, collect_image_assets
 from ranobelib_epub.inventory import (
@@ -166,11 +167,9 @@ def _safe_chapter_context(chapter: NormalizedChapter) -> str:
     parts: list[str] = []
     if chapter.volume:
         parts.append(f"volume {chapter.volume}")
-    if chapter.number:
-        number = chapter.number
-        if chapter.number_secondary:
-            number = f"{number}.{chapter.number_secondary}"
-        parts.append(f"number {number}")
+    chapter_number = display_chapter_number(chapter.number, chapter.number_secondary)
+    if chapter_number:
+        parts.append(f"number {chapter_number}")
     title = (
         chapter.source_title or chapter.source_name or chapter.toc_title or chapter.generated_title
     )

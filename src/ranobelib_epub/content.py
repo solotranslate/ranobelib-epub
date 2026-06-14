@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ranobelib_epub.display_numbering import display_chapter_number
+
 
 @dataclass(frozen=True, slots=True)
 class Attachment:
@@ -212,10 +214,8 @@ def _generate_title(metadata: _ChapterMetadata) -> str:
     parts: list[str] = []
     if metadata.volume:
         parts.append(f"Volume {metadata.volume}")
-    if metadata.number:
-        chapter_number = metadata.number
-        if metadata.number_secondary:
-            chapter_number = f"{chapter_number}.{metadata.number_secondary}"
+    chapter_number = display_chapter_number(metadata.number, metadata.number_secondary)
+    if chapter_number:
         parts.append(f"Chapter {chapter_number}")
     if parts:
         return " ".join(parts)
