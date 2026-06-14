@@ -584,12 +584,13 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
         if (!window.fetch || !window.FormData || !window.URL) return;
         event.preventDefault();
         const submitter = event.submitter || form.querySelector('button[type="submit"]');
+        const body = submitter ? new FormData(form, submitter) : new FormData(form);
         const originalText = submitter ? submitter.textContent : '';
         form.classList.remove('is-complete', 'has-build-error');
         if (submitter) {{ submitter.disabled = true; submitter.textContent = 'Building EPUB…'; }}
         form.classList.add('is-building');
         try {{
-          const response = await fetch(form.action, {{ method: 'POST', body: new FormData(form, submitter) }});
+          const response = await fetch(form.action, {{ method: 'POST', body }});
           const contentType = response.headers.get('content-type') || '';
           if (!response.ok || !contentType.includes('application/epub+zip')) {{
             const message = response.ok ? 'Build failed: server did not return an EPUB.' : await response.text();

@@ -184,7 +184,10 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert "Download ready / Download started." in response.text
     assert 'data-build-error-state' in response.text
     assert "fetch(form.action" in response.text
-    assert "new FormData(form, submitter)" in response.text
+    assert (
+        "const body = submitter ? new FormData(form, submitter) : new FormData(form);"
+        in response.text
+    )
     assert "triggerDownload" in response.text
     assert "use branch/range filters or split the title into multiple EPUB files" in response.text
     assert "background worker" not in response.text.lower()
