@@ -512,7 +512,7 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
     .summary div{{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:10px}} .summary dt{{font-size:.82rem;color:#64748b}} .summary dd{{margin:2px 0 0;font-weight:700}}
     .settings-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}} label{{display:block;font-weight:650}} input,select,button{{font:inherit;border-radius:10px;border:1px solid #bfc7d5;padding:9px 11px}} input[type="text"],input[type="url"],input:not([type]){{width:100%;box-sizing:border-box;margin-top:5px}} input[type="checkbox"]{{margin-right:8px}} button{{cursor:pointer;background:#243b63;color:#fff;border-color:#243b63;font-weight:700}} button.secondary{{background:#fff;color:#243b63}}
     .muted{{color:#64748b;font-size:.95rem}} .ok{{color:#176b32}} .bad{{color:#9f1d1d}} .branches{{display:grid;gap:18px}} .branch-card{{padding:0;overflow:hidden}} .branch-header{{padding:18px 20px;background:#eef4ff;border-bottom:1px solid #d9deea}} .branch-meta{{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}} .pill{{background:#fff;border:1px solid #cbd5e1;border-radius:999px;padding:4px 9px;font-size:.88rem}}
-    .branch-body{{padding:18px 20px}} .range{{border:1px dashed #b6c2d6;border-radius:14px;padding:14px;margin-bottom:16px;background:#fbfdff}} .range-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}} .volume-group{{margin:16px 0}} .volume-title{{font-size:1rem;margin:0 0 8px}} table{{border-collapse:collapse;width:100%;background:#fff}} td,th{{border:1px solid #e2e8f0;padding:8px;text-align:left;vertical-align:top}} th{{background:#f8fafc}} .actions{{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}} .progress-note{{display:none;margin-top:12px;padding:12px;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe}} .is-building .progress-note{{display:block}} .is-building button[type="submit"]{{opacity:.7;cursor:wait}} .bar{{height:8px;border-radius:999px;background:linear-gradient(90deg,#93c5fd,#dbeafe,#93c5fd);background-size:200% 100%;animation:indeterminate 1.2s linear infinite}} @keyframes indeterminate{{from{{background-position:200% 0}}to{{background-position:-200% 0}}}}
+    .branch-body{{padding:18px 20px}} .range{{border:1px dashed #b6c2d6;border-radius:14px;padding:14px;margin-bottom:16px;background:#fbfdff}} .range-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}} .volume-group{{margin:16px 0}} .volume-title{{font-size:1rem;margin:0 0 8px}} table{{border-collapse:collapse;width:100%;background:#fff}} td,th{{border:1px solid #e2e8f0;padding:8px;text-align:left;vertical-align:top}} th{{background:#f8fafc}} .actions{{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}} .progress-note,.build-complete,.build-error{{display:none;margin-top:12px;padding:12px;border-radius:12px;border:1px solid #bfdbfe}} .progress-note{{background:#eff6ff}} .build-complete{{background:#ecfdf5;border-color:#bbf7d0}} .build-error{{background:#fef2f2;border-color:#fecaca}} .is-building .progress-note,.is-complete .build-complete,.has-build-error .build-error{{display:block}} .is-building button[type="submit"]{{opacity:.7;cursor:wait}} .bar{{height:8px;border-radius:999px;background:linear-gradient(90deg,#93c5fd,#dbeafe,#93c5fd);background-size:200% 100%;animation:indeterminate 1.2s linear infinite}} @keyframes indeterminate{{from{{background-position:200% 0}}to{{background-position:-200% 0}}}}
   </style>
 </head>
 <body>
@@ -557,8 +557,23 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
   <script>
   (() => {{
     const settings = [...document.querySelectorAll('[data-build-setting]')];
+    const filenameFromDisposition = (header) => {{
+      const fallback = 'ranobelib-title.epub';
+      if (!header) return fallback;
+      const utf8 = header.match(/filename\*=UTF-8''([^;]+)/i);
+      if (utf8) return decodeURIComponent(utf8[1]).replace(/[\\/]/g, '_') || fallback;
+      const ascii = header.match(/filename="?([^";]+)"?/i);
+      return ascii ? ascii[1].replace(/[\\/]/g, '_') : fallback;
+    }};
+    const triggerDownload = (blob, filename) => {{
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url; link.download = filename; link.style.display = 'none';
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    }};
     document.querySelectorAll('form[data-branch-form]').forEach((form) => {{
-      form.addEventListener('submit', (event) => {{
+      form.addEventListener('submit', async (event) => {{
         form.querySelectorAll('[data-mirrored-setting]').forEach((node) => node.remove());
         settings.forEach((source) => {{
           if (source.type === 'checkbox' && !source.checked) return;
@@ -566,9 +581,32 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
           hidden.type = 'hidden'; hidden.name = source.name; hidden.value = source.value;
           hidden.setAttribute('data-mirrored-setting', 'true'); form.appendChild(hidden);
         }});
+        if (!window.fetch || !window.FormData || !window.URL) return;
+        event.preventDefault();
         const submitter = event.submitter || form.querySelector('button[type="submit"]');
+        const body = submitter ? new FormData(form, submitter) : new FormData(form);
+        const originalText = submitter ? submitter.textContent : '';
+        form.classList.remove('is-complete', 'has-build-error');
         if (submitter) {{ submitter.disabled = true; submitter.textContent = 'Building EPUB…'; }}
         form.classList.add('is-building');
+        try {{
+          const response = await fetch(form.action, {{ method: 'POST', body }});
+          const contentType = response.headers.get('content-type') || '';
+          if (!response.ok || !contentType.includes('application/epub+zip')) {{
+            const message = response.ok ? 'Build failed: server did not return an EPUB.' : await response.text();
+            throw new Error(message.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || 'Build failed.');
+          }}
+          const blob = await response.blob();
+          triggerDownload(blob, filenameFromDisposition(response.headers.get('content-disposition')));
+          form.classList.add('is-complete');
+        }} catch (error) {{
+          const target = form.querySelector('[data-build-error-message]');
+          if (target) target.textContent = error.message || 'Build failed.';
+          form.classList.add('has-build-error');
+        }} finally {{
+          form.classList.remove('is-building');
+          if (submitter) {{ submitter.disabled = false; submitter.textContent = originalText; }}
+        }}
       }});
       const update = () => {{
         const count = form.querySelectorAll('input[name="selected_variant"]:checked').length;
@@ -646,11 +684,17 @@ def _branch_card(
               <button class="secondary" type="submit" name="selection_mode" value="checked">Build checked chapters</button>
               <span class="muted"><span data-selected-count>0</span> checked; images on/off follows Build settings; sync limit {MAX_SYNC_BUILD_VARIANTS}.</span>
             </div>
-            <div class="progress-note" role="status" aria-live="polite">
+            <div class="progress-note" role="status" aria-live="polite" data-build-active-state>
               <div class="bar" aria-hidden="true"></div>
               <p><strong>Building EPUB…</strong></p>
               <p>Fetching selected chapters and optional images, then packaging EPUB. Keep this tab open.</p>
               <p class="muted">Selected chapter count is shown above when JavaScript is available; this branch has {len(variants)} buildable chapters, images follow the toggle, sync limit {MAX_SYNC_BUILD_VARIANTS}.</p>
+            </div>
+            <div class="build-complete" role="status" aria-live="polite" data-build-complete-state>
+              <p><strong>Download ready / Download started.</strong></p>
+            </div>
+            <div class="build-error" role="alert" data-build-error-state>
+              <p><strong>Build failed.</strong> <span data-build-error-message>Please review the request and try again.</span></p>
             </div>
           </div>
         </form>
