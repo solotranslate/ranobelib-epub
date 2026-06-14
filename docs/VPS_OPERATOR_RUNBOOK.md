@@ -26,6 +26,24 @@ source .venv/bin/activate
 uvicorn ranobelib_epub.app:app --host 127.0.0.1 --port 8000
 ```
 
+## Bind address and temporary external smoke
+
+The manual start command uses `--host 127.0.0.1`, which is the safe local/VPS-only bind. It works for local `curl` checks on the VPS and for access through an operator-managed reverse proxy or SSH tunnel. It is not reachable directly from the operator laptop over the public internet.
+
+For temporary direct external smoke testing only, an operator may instead run:
+
+```sh
+uvicorn ranobelib_epub.app:app --host 0.0.0.0 --port 8000
+```
+
+Then open:
+
+```text
+http://<VPS_PUBLIC_IP>:8000/
+```
+
+This is temporary because the service currently has no authentication. The VPS or cloud firewall must allow inbound TCP `8000` for the direct external check to work. After testing, close the firewall rule or stop the process. Do not treat this as production exposure, and do not add systemd, nginx, caddy, or deployment automation in this PR.
+
 ## Health check
 
 Check the local health endpoint:
