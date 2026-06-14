@@ -40,6 +40,12 @@ BuildProgressStage = Literal[
     "starting", "fetching_chapters", "fetching_images", "building_epub"
 ]
 BuildProgressCallback = Callable[..., None]
+CancellationCheck = Callable[[], None]
+
+
+class BuildCancelledError(RuntimeError):
+    """Raised when an EPUB build is cooperatively cancelled."""
+
 
 
 def build_selected_chapter_epub(
@@ -52,6 +58,7 @@ def build_selected_chapter_epub(
     image_fetcher: ImageAssetFetcher | None = None,
     image_limits: ImageFetchLimits | None = None,
     progress_callback: BuildProgressCallback | None = None,
+    cancellation_check: CancellationCheck | None = None,
 ) -> ChapterBuildResult:
     """Fetch selected buildable chapter variants in order and build EPUB bytes.
 
@@ -62,6 +69,11 @@ def build_selected_chapter_epub(
     Images remain disabled by default; callers may opt in with a bounded read-only fetcher.
     """
 
+    def check_cancelled() -> None:
+        if cancellation_check is not None:
+            cancellation_check()
+
+    check_cancelled()
     buildable_variants = _validate_selection(selected_variants)
     if progress_callback is not None:
         progress_callback("starting", message="Начинаю сборку EPUB")
@@ -71,6 +83,7 @@ def build_selected_chapter_epub(
     warnings: list[str] = []
     chapter_total = len(buildable_variants)
     for index, variant in enumerate(buildable_variants, start=1):
+        check_cancelled()
         if progress_callback is not None:
             progress_callback(
                 "fetching_chapters",
@@ -79,6 +92,7 @@ def build_selected_chapter_epub(
                 chapter_total=chapter_total,
             )
         content = fetch_chapter_content(slug, variant, transport, base_url=base_url)
+        check_cancelled()
         chapters.append(content.chapter)
         requests.append(content.request)
         warnings.extend(content.warnings)
@@ -91,12 +105,18 @@ def build_selected_chapter_epub(
         if progress_callback is not None:
             progress_callback("fetching_images", message="Загружаю иллюстрации")
         image_assets, image_warnings = collect_image_assets(
-            normalized_chapters, image_fetcher, image_limits, progress_callback=progress_callback
+            normalized_chapters,
+            image_fetcher,
+            image_limits,
+            progress_callback=progress_callback,
+            cancellation_check=check_cancelled,
         )
         warnings.extend(image_warnings)
 
+    check_cancelled()
     if progress_callback is not None:
         progress_callback("building_epub", message="Упаковываю EPUB")
+    check_cancelled()
 
     return ChapterBuildResult(
         epub_bytes=build_epub_bytes(metadata, normalized_chapters, image_assets=image_assets),

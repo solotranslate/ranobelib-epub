@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ranobelib_epub.build import build_selected_chapter_epub
+from ranobelib_epub.build import BuildCancelledError, build_selected_chapter_epub
 from ranobelib_epub.epub import BookMetadata
 from ranobelib_epub.inventory import ChapterBranchVariant, ChapterRequest
 
@@ -143,6 +143,27 @@ def test_build_selected_chapter_epub_accepts_image_only_chapter() -> None:
 
     assert result.epub_bytes
     assert len(result.chapters) == 1
+
+
+def test_build_selected_chapter_epub_checks_cancellation_before_packaging() -> None:
+    transport = FakeTransport([_payload(1, "1", "First")])
+    calls = {"count": 0}
+
+    def cancellation_check() -> None:
+        calls["count"] += 1
+        if calls["count"] >= 4:
+            raise BuildCancelledError("Сборка остановлена.")
+
+    with pytest.raises(BuildCancelledError, match="Сборка остановлена"):
+        build_selected_chapter_epub(
+            "demo-title",
+            BookMetadata(title="Demo"),
+            [_variant(10, "1")],
+            transport,
+            cancellation_check=cancellation_check,
+        )
+
+    assert transport.requests
 
 
 def _variant(branch_id: int, number: str) -> ChapterBranchVariant:

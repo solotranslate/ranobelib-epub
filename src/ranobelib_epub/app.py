@@ -70,6 +70,7 @@ class BuildService(Protocol):
         *,
         include_images: bool = False,
         progress_callback: Any | None = None,
+        cancellation_check: Any | None = None,
     ) -> bytes: ...
 
 
@@ -85,6 +86,7 @@ class RanobeLibBuildService:
         *,
         include_images: bool = False,
         progress_callback: Any | None = None,
+        cancellation_check: Any | None = None,
     ) -> bytes:
         result = build_selected_chapter_epub(
             title.slug,
@@ -94,6 +96,7 @@ class RanobeLibBuildService:
             image_fetcher=HttpxImageAssetFetcher() if include_images else None,
             image_limits=ImageFetchLimits() if include_images else None,
             progress_callback=progress_callback,
+            cancellation_check=cancellation_check,
         )
         return result.epub_bytes
 
@@ -306,6 +309,13 @@ def start_build_job(
     return JSONResponse({"job_id": job_id}, status_code=202)
 
 
+@app.post("/build-jobs/{job_id}/cancel", response_class=JSONResponse, response_model=None)
+def cancel_build_job(job_id: str) -> JSONResponse:
+    _job, message, status_code = BUILD_JOBS.cancel(job_id)
+    payload = {"status": "cancelled" if status_code == 200 else "error", "message": message}
+    return JSONResponse(payload, status_code=status_code)
+
+
 @app.get("/build-jobs/{job_id}", response_class=JSONResponse, response_model=None)
 def build_job_status(job_id: str) -> JSONResponse:
     job = BUILD_JOBS.get(job_id)
@@ -327,6 +337,8 @@ def download_build_job(job_id: str) -> Response:
         return JSONResponse(
             {"message": job.error or "Сборка не удалась."}, status_code=409
         )
+    if job.status == "cancelled":
+        return JSONResponse({"message": "Сборка остановлена."}, status_code=409)
     if job.status != "ready" or job.epub_bytes is None:
         return JSONResponse({"message": "Файл сборки ещё не готов."}, status_code=409)
     return Response(
@@ -723,6 +735,7 @@ def _inventory_page(
         else if (payload.image_current !== undefined) bits.push(`Иллюстраций загружено: ${{payload.image_current}}`);
         if (statusCounts) statusCounts.textContent = bits.join(' · ');
         if (payload.status === 'ready') return payload.download_url || `/build-jobs/${{encodeURIComponent(jobId)}}/download`;
+        if (payload.status === 'cancelled') return null;
         if (payload.status === 'failed') throw new Error(payload.error || payload.message || 'Сборка не удалась.');
         await new Promise((resolve) => setTimeout(resolve, 1200));
       }}
@@ -801,17 +814,29 @@ def _inventory_page(
         const submitter = event.submitter || form.querySelector('button[type="submit"]');
         const body = submitter ? new FormData(form, submitter) : new FormData(form);
         const originalText = submitter ? submitter.textContent : '';
+        const stopButton = form.querySelector('[data-build-stop]');
+        delete form.dataset.currentBuildJob;
+        delete form.dataset.cancelRequested;
+        if (stopButton) {{ stopButton.disabled = false; stopButton.textContent = 'Остановить'; }}
         form.classList.remove('is-complete', 'has-build-error');
         const readyLink = form.querySelector('[data-build-download-link]');
         if (readyLink) {{ readyLink.hidden = true; readyLink.removeAttribute('href'); }}
-        if (submitter) {{ submitter.disabled = true; submitter.textContent = 'Собираю EPUB…'; }}
+        if (submitter) {{ submitter.dataset.originalText = originalText; submitter.disabled = true; submitter.textContent = 'Собираю EPUB…'; }}
         form.classList.add('is-building');
+        let startedJobId = null;
         try {{
           const start = await fetch('/build-jobs', {{ method: 'POST', body, headers: {{'Accept': 'application/json'}} }});
           const payload = await start.json().catch(() => ({{message: 'Не удалось запустить сборку.'}}));
           if (start.status === 429 || start.status === 409) throw new Error(payload.message || busyMessage);
           if (!start.ok || !payload.job_id) throw new Error(payload.message || 'Не удалось запустить сборку.');
-          const downloadUrl = await pollJob(payload.job_id, form);
+          startedJobId = payload.job_id;
+          form.dataset.currentBuildJob = startedJobId;
+          const downloadUrl = await pollJob(startedJobId, form);
+          if (!downloadUrl) {{
+            const statusText = form.querySelector('[data-build-status-message]');
+            if (statusText) statusText.textContent = 'Сборка остановлена.';
+            return;
+          }}
           if (readyLink) {{ readyLink.href = downloadUrl; readyLink.hidden = false; }}
           const response = await fetch(downloadUrl, {{headers: {{'Accept': 'application/epub+zip'}}}});
           if (!response.ok) {{
@@ -825,10 +850,40 @@ def _inventory_page(
           if (target) target.textContent = error.message || 'Сборка не удалась.';
           form.classList.add('has-build-error');
         }} finally {{
-          form.classList.remove('is-building');
-          if (submitter) {{ submitter.disabled = false; submitter.textContent = originalText; }}
+          const currentJobId = form.dataset.currentBuildJob;
+          if (!currentJobId || currentJobId === startedJobId) {{
+            form.classList.remove('is-building');
+            delete form.dataset.currentBuildJob;
+            delete form.dataset.cancelRequested;
+            if (stopButton) {{ stopButton.disabled = false; stopButton.textContent = 'Остановить'; }}
+            if (submitter) {{ submitter.disabled = false; submitter.textContent = originalText; delete submitter.dataset.originalText; }}
+          }}
         }}
       }});
+      const stopButton = form.querySelector('[data-build-stop]');
+      if (stopButton) {{
+        stopButton.addEventListener('click', async () => {{
+          const jobId = form.dataset.currentBuildJob;
+          if (!jobId) return;
+          stopButton.disabled = true;
+          stopButton.textContent = 'Останавливаю сборку…';
+          form.dataset.cancelRequested = 'true';
+          const statusText = form.querySelector('[data-build-status-message]');
+          if (statusText) statusText.textContent = 'Останавливаю сборку…';
+          try {{
+            const response = await fetch(`/build-jobs/${{encodeURIComponent(jobId)}}/cancel`, {{ method: 'POST', headers: {{'Accept': 'application/json'}} }});
+            const payload = await response.json().catch(() => ({{message: 'Не удалось остановить сборку.'}}));
+            if (!response.ok) throw new Error(payload.message || 'Не удалось остановить сборку.');
+            if (statusText) statusText.textContent = payload.message || 'Сборка остановлена.';
+          }} catch (error) {{
+            const target = form.querySelector('[data-build-error-message]');
+            if (target) target.textContent = error.message || 'Не удалось остановить сборку.';
+            form.classList.add('has-build-error');
+            stopButton.disabled = false;
+            stopButton.textContent = 'Остановить';
+          }}
+        }});
+      }}
       const update = () => {{
         const count = form.querySelectorAll('input[name="selected_variant"]:checked').length;
         form.querySelectorAll('[data-selected-count]').forEach((node) => node.textContent = String(count));
@@ -987,6 +1042,7 @@ def _branch_card(
               <p><strong>Собираю EPUB…</strong> <span data-build-status-message>Задача поставлена в очередь; ожидаю начала сборки EPUB.</span></p>
               <p data-build-status-counts class="muted"></p>
               <p>Загружаю выбранные главы и иллюстрации, затем упаковываю EPUB. Не закрывайте эту вкладку.</p>
+              <p><button type="button" class="secondary" data-build-stop>Остановить</button></p>
               <p class="muted">Количество выбранных глав показано выше, если доступен JavaScript; в этой ветке {len(variants)} глав доступно, иллюстрации зависят от переключателя, лимит синхронной сборки {MAX_SYNC_BUILD_VARIANTS}.</p>
             </div>
             <div class="build-complete" role="status" aria-live="polite" data-build-complete-state>

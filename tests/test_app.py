@@ -195,6 +195,7 @@ class FakeBuildService:
         *,
         include_images: bool = False,
         progress_callback=None,
+        cancellation_check=None,
     ) -> bytes:
         if progress_callback is not None:
             progress_callback(
@@ -1327,3 +1328,66 @@ def test_default_branch_null_branch_id_keeps_quick_build_ui() -> None:
     assert "ID ветки: default" in response.text
     assert "Собрать всю ветку" in response.text
     assert "Нет доступных для сборки вариантов." not in response.text
+
+
+def test_cancel_endpoint_and_download_cancelled_job_return_controlled_json() -> None:
+    original_jobs = app_module.BUILD_JOBS
+    try:
+        manager = app_module.BuildJobManager()
+        app_module.BUILD_JOBS = manager
+        manager._jobs["active"] = BuildJobSnapshot(
+            job_id="active",
+            status="fetching_images",
+            message="Fetching images",
+            created_at=0.0,
+            updated_at=0.0,
+            epub_bytes=b"partial epub",
+        )
+        client = TestClient(app)
+
+        cancel_response = client.post("/build-jobs/active/cancel")
+        assert cancel_response.status_code == 200
+        assert cancel_response.json() == {
+            "status": "cancelled",
+            "message": "Сборка остановлена.",
+        }
+
+        status_response = client.get("/build-jobs/active")
+        assert status_response.status_code == 200
+        assert status_response.json()["status"] == "cancelled"
+        assert status_response.json()["message"] == "Сборка остановлена."
+        assert "download_url" not in status_response.json()
+        assert manager.get("active").epub_bytes is None  # type: ignore[union-attr]
+
+        download_response = client.get("/build-jobs/active/download")
+        assert download_response.status_code == 409
+        assert download_response.json() == {"message": "Сборка остановлена."}
+    finally:
+        app_module.BUILD_JOBS = original_jobs
+
+
+def test_frontend_contains_stop_button_and_cancel_flow() -> None:
+    app.dependency_overrides[get_inventory_service] = lambda: FakeInventoryService()
+    app.dependency_overrides[get_title_detail_service] = lambda: FakeTitleDetailService()
+    try:
+        client = TestClient(app)
+        response = client.get("/inventory", params={"title_url": "https://ranobelib.me/ru/book/1--demo"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "Остановить" in response.text
+    assert "/cancel" in response.text
+    assert "Останавливаю сборку…" in response.text
+    assert "currentBuildJob" in response.text
+    assert "let startedJobId = null" in response.text
+    assert "currentJobId === startedJobId" in response.text
+    assert "classList.remove('is-building')" in response.text
+
+    stop_handler = response.text.split("stopButton.addEventListener('click'", 1)[
+        1
+    ].split("const update = ()", 1)[0]
+    assert "form.dataset.cancelRequested = 'true'" in stop_handler
+    assert "fetch(`/build-jobs/${encodeURIComponent(jobId)}/cancel`" in stop_handler
+    assert "form.classList.remove('is-building')" not in stop_handler
+    assert 'form.querySelectorAll(\'button[type="submit"]\')' not in stop_handler

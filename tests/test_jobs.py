@@ -79,3 +79,53 @@ def test_concurrency_guard_rejects_second_active_job() -> None:
         assert "Сервис сейчас занят. Попробуйте чуть позже." in str(exc)
     else:
         raise AssertionError("Expected concurrency guard to reject active job")
+
+
+def test_cancel_active_job_marks_cancelled_and_hides_epub_bytes() -> None:
+    clock = ManualClock()
+    manager = BuildJobManager(clock=clock)
+    job_id = "active"
+    manager._jobs[job_id] = BuildJobSnapshot(
+        job_id=job_id,
+        status="fetching_chapters",
+        message="Fetching",
+        created_at=clock(),
+        updated_at=clock(),
+        epub_bytes=b"partial",
+    )
+
+    snapshot, message, status_code = manager.cancel(job_id)
+
+    assert status_code == 200
+    assert message == "Сборка остановлена."
+    assert snapshot is not None
+    assert snapshot.status == "cancelled"
+    assert snapshot.epub_bytes is None
+    public = snapshot.public_dict()
+    assert public["status"] == "cancelled"
+    assert public["message"] == "Сборка остановлена."
+    assert "download_url" not in public
+
+
+def test_cancel_non_active_jobs_returns_controlled_russian_messages() -> None:
+    clock = ManualClock()
+    manager = BuildJobManager(clock=clock)
+    for status, expected in (
+        ("ready", "Сборка уже завершена, остановка невозможна."),
+        ("failed", "Сборка уже завершилась ошибкой, остановка невозможна."),
+        ("cancelled", "Сборка уже остановлена."),
+    ):
+        manager._jobs[status] = BuildJobSnapshot(
+            job_id=status,
+            status=status,  # type: ignore[arg-type]
+            message="Done",
+            created_at=clock(),
+            updated_at=clock(),
+        )
+        _snapshot, message, status_code = manager.cancel(status)
+        assert status_code == 409
+        assert message == expected
+
+    _snapshot, message, status_code = manager.cancel("missing")
+    assert status_code == 404
+    assert message == "Задача сборки не найдена или устарела."
