@@ -4,7 +4,15 @@ from dataclasses import dataclass
 from typing import Sequence, cast
 
 from ranobelib_epub.chapter_client import fetch_chapter_content
-from ranobelib_epub.content import NormalizedChapter
+from ranobelib_epub.content import (
+    Blockquote,
+    ChapterBlock,
+    ChapterList,
+    Heading,
+    Image,
+    NormalizedChapter,
+    Paragraph,
+)
 from ranobelib_epub.epub import BookMetadata, build_epub_bytes
 from ranobelib_epub.images import ImageAssetFetcher, ImageFetchLimits, collect_image_assets
 from ranobelib_epub.inventory import (
@@ -60,6 +68,8 @@ def build_selected_chapter_epub(
         warnings.extend(content.warnings)
 
     normalized_chapters = tuple(chapters)
+    _reject_empty_normalized_chapters(normalized_chapters)
+
     image_assets = None
     if image_fetcher is not None:
         image_assets, image_warnings = collect_image_assets(
@@ -100,3 +110,53 @@ def _validate_selection(
             )
         )
     return tuple(buildable)
+
+
+def _reject_empty_normalized_chapters(chapters: tuple[NormalizedChapter, ...]) -> None:
+    for chapter in chapters:
+        if not _chapter_has_meaningful_content(chapter):
+            raise ValueError(
+                f"Chapter {_safe_chapter_context(chapter)} normalized to empty content; "
+                "check branch selection or source payload."
+            )
+
+
+def _chapter_has_meaningful_content(chapter: NormalizedChapter) -> bool:
+    return any(_block_has_meaningful_content(block) for block in chapter.blocks)
+
+
+def _block_has_meaningful_content(block: ChapterBlock) -> bool:
+    if isinstance(block, Paragraph | Heading):
+        return any(run.text.strip() for run in block.runs)
+    if isinstance(block, ChapterList):
+        return any(
+            _block_has_meaningful_content(child)
+            for item in block.items
+            for child in item.blocks
+        )
+    if isinstance(block, Blockquote):
+        return any(_block_has_meaningful_content(child) for child in block.blocks)
+    if isinstance(block, Image):
+        return any((block.name, block.src, block.attachment))
+    return False
+
+
+def _safe_chapter_context(chapter: NormalizedChapter) -> str:
+    parts: list[str] = []
+    if chapter.volume:
+        parts.append(f"volume {chapter.volume}")
+    if chapter.number:
+        number = chapter.number
+        if chapter.number_secondary:
+            number = f"{number}.{chapter.number_secondary}"
+        parts.append(f"number {number}")
+    title = (
+        chapter.source_title or chapter.source_name or chapter.toc_title or chapter.generated_title
+    )
+    if title:
+        parts.append(f"title {title!r}")
+    if chapter.branch_id is not None:
+        parts.append(f"branch id {chapter.branch_id}")
+    if chapter.id is not None:
+        parts.append(f"chapter id {chapter.id}")
+    return ", ".join(parts) or "unknown chapter"

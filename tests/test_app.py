@@ -179,6 +179,13 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert "Build checked chapters" in response.text
     assert "Building EPUB…" in response.text
     assert "Fetching selected chapters and optional images, then packaging EPUB. Keep this tab open." in response.text
+    assert 'data-build-active-state' in response.text
+    assert 'data-build-complete-state' in response.text
+    assert "Download ready / Download started." in response.text
+    assert 'data-build-error-state' in response.text
+    assert "fetch(form.action" in response.text
+    assert "new FormData(form, submitter)" in response.text
+    assert "triggerDownload" in response.text
     assert "use branch/range filters or split the title into multiple EPUB files" in response.text
     assert "background worker" not in response.text.lower()
     assert "progress polling" not in response.text.lower()

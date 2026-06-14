@@ -65,15 +65,55 @@ def test_build_selected_chapter_epub_rejects_empty_selection_before_transport_ca
     assert transport.requests == []
 
 
-def test_build_selected_chapter_epub_preserves_normalizer_warnings() -> None:
-    transport = FakeTransport([{"data": {"id": 1, "content": {"type": "paragraph"}}}])
+def test_build_selected_chapter_epub_rejects_empty_normalized_chapter_before_packaging() -> None:
+    transport = FakeTransport(
+        [
+            {
+                "data": {
+                    "id": 1,
+                    "volume": "1",
+                    "number": "1",
+                    "title": "Empty",
+                    "branch_id": 10,
+                    "content": {"type": "doc", "content": []},
+                }
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        build_selected_chapter_epub(
+            "demo-title", BookMetadata(title="Demo"), [_variant(10, "1")], transport
+        )
+
+    message = str(exc_info.value)
+    assert (
+        "Chapter volume 1, number 1, title 'Empty', branch id 10, chapter id 1 "
+        "normalized to empty content"
+    ) in message
+    assert "check branch selection or source payload" in message
+    assert "data" not in message
+    assert "Traceback" not in message
+
+
+def test_build_selected_chapter_epub_rejects_whitespace_only_chapter() -> None:
+    transport = FakeTransport([_payload(1, "1", "   ")])
+
+    with pytest.raises(ValueError, match="normalized to empty content"):
+        build_selected_chapter_epub(
+            "demo-title", BookMetadata(title="Demo"), [_variant(10, "1")], transport
+        )
+
+
+def test_build_selected_chapter_epub_accepts_image_only_chapter() -> None:
+    transport = FakeTransport([_image_payload(1, "1")])
 
     result = build_selected_chapter_epub(
         "demo-title", BookMetadata(title="Demo"), [_variant(10, "1")], transport
     )
 
-    assert result.warnings == ('data.content type is not "doc"; chapter content skipped',)
-    assert result.chapters[0].warnings == result.warnings
+    assert result.epub_bytes
+    assert len(result.chapters) == 1
 
 
 def _variant(branch_id: int, number: str) -> ChapterBranchVariant:
@@ -98,6 +138,24 @@ def _payload(chapter_id: int, number: str, text: str) -> dict[str, object]:
                 "type": "doc",
                 "content": [
                     {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+                ],
+            },
+        }
+    }
+
+
+def _image_payload(chapter_id: int, number: str) -> dict[str, object]:
+    return {
+        "data": {
+            "id": chapter_id,
+            "volume": "1",
+            "number": number,
+            "title": f"Chapter {number}",
+            "attachments": [{"name": "page-1", "url": "https://img.example.test/page-1.jpg"}],
+            "content": {
+                "type": "doc",
+                "content": [
+                    {"type": "image", "attrs": {"images": [{"image": "page-1"}]}}
                 ],
             },
         }
