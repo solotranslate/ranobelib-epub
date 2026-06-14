@@ -67,7 +67,9 @@ class FakeInventoryService:
                 ),
             ),
             variants=(buildable, blocked),
-            warnings=(InventoryWarning("Chapter branch variant is not buildable", 2, 102),),
+            warnings=(
+                InventoryWarning("Chapter branch variant is not buildable", 2, 102),
+            ),
         )
 
 
@@ -114,8 +116,53 @@ class FakeDefaultBranchInventoryService:
         )
 
 
+class FakeManyChaptersInventoryService:
+    def __init__(
+        self,
+        count: int,
+        *,
+        volumes: tuple[str, ...] = ("1",),
+        default_branch: bool = False,
+    ) -> None:
+        self.count = count
+        self.volumes = volumes
+        self.default_branch = default_branch
+
+    def fetch(self, title: RanobeLibTitleUrl) -> ChapterInventory:
+        variants = []
+        logicals = []
+        for index in range(1, self.count + 1):
+            volume = self.volumes[
+                min(len(self.volumes) - 1, (index - 1) // MAX_SYNC_BUILD_VARIANTS)
+            ]
+            variant = ChapterBranchVariant(
+                external_chapter_id=1000 + index,
+                branch_id=None if self.default_branch else 55,
+                volume=volume,
+                number=str(index),
+                number_secondary=None,
+                chapter_title=f"Chapter {index}",
+                branch_team="Team A",
+                is_default_branch=self.default_branch,
+            )
+            variants.append(variant)
+            logicals.append(
+                LogicalChapter(
+                    logical_id=index,
+                    volume=volume,
+                    number=str(index),
+                    number_secondary=None,
+                    name=f"Chapter {index}",
+                    variants=(variant,),
+                )
+            )
+        return ChapterInventory(title.slug, tuple(logicals), tuple(variants))
+
+
 class FakeTitleDetailService:
-    def __init__(self, detail: TitleDetailMetadata | None = None, *, fail: bool = False) -> None:
+    def __init__(
+        self, detail: TitleDetailMetadata | None = None, *, fail: bool = False
+    ) -> None:
         self.detail = detail or TitleDetailMetadata(
             display_title="Русское название",
             author="Автор Один",
@@ -135,7 +182,9 @@ class FakeTitleDetailService:
 class FakeBuildService:
     def __init__(self) -> None:
         self.calls: list[
-            tuple[RanobeLibTitleUrl, BookMetadata, tuple[ChapterBranchVariant, ...], bool]
+            tuple[
+                RanobeLibTitleUrl, BookMetadata, tuple[ChapterBranchVariant, ...], bool
+            ]
         ] = []
 
     def build(
@@ -206,18 +255,23 @@ def test_index() -> None:
 def test_inventory_preview_uses_fake_service_without_network() -> None:
     service = FakeInventoryService()
     app.dependency_overrides[get_inventory_service] = lambda: service
-    app.dependency_overrides[get_title_detail_service] = lambda: FakeTitleDetailService()
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
     client = TestClient(app)
 
     try:
         response = client.get(
-            "/inventory", params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"}
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
         )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert service.seen == [RanobeLibTitleUrl(title_id=12345, slug="demo-title", locale="ru")]
+    assert service.seen == [
+        RanobeLibTitleUrl(title_id=12345, slug="demo-title", locale="ru")
+    ]
     assert "https://ranobelib.me/ru/book/12345--demo-title" in response.text
     assert "demo-title" in response.text
     assert "Inventory preview" not in response.text
@@ -233,9 +287,9 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert "Ветки перевода" in response.text
     assert "Team A" in response.text
     assert "ID ветки: 55" in response.text
-    assert "Глав доступно: 1" in response.text
-    assert "Диапазон томов: 1–1" in response.text
-    assert "Диапазон глав: 2–2" in response.text
+    assert "Доступно для сборки: 1 глав" in response.text
+    assert "Том: 1" in response.text
+    assert "Главы: 2" in response.text
     assert "Том 1" in response.text
     assert "Two roads" in response.text
     assert 'action="/build"' in response.text
@@ -244,29 +298,36 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
     assert 'name="book_title"' in response.text
     assert 'value="Русское название"' in response.text
     assert 'name="author"' in response.text
-    assert '<label>Translator' not in response.text
-    assert '<label>Team' not in response.text
-    assert '<label>Language' not in response.text
+    assert "<label>Translator" not in response.text
+    assert "<label>Team" not in response.text
+    assert "<label>Language" not in response.text
     assert 'type="hidden" name="language" value="ru"' in response.text
     assert "Настройки сборки" in response.text
     assert 'name="include_images"' in response.text
     assert 'name="include_images" value="true" checked' in response.text
-    assert "Иллюстрации могут замедлить сборку и увеличить размер EPUB." in response.text
+    assert (
+        "Иллюстрации могут замедлить сборку и увеличить размер EPUB." in response.text
+    )
     assert 'name="selected_variant"' in response.text
     assert response.text.count('<input type="checkbox" name="selected_variant"') == 1
     assert "недоступно для сборки" in response.text
     assert "нельзя выбрать" in response.text
     assert "Chapter branch variant is not buildable" in response.text
-    assert f"Текущий лимит синхронной сборки: {MAX_SYNC_BUILD_VARIANTS}" in response.text
-    assert "Выбрать диапазон внутри этой ветки" in response.text
-    assert "Собрать эту ветку/диапазон" in response.text
+    assert (
+        f"Текущий лимит синхронной сборки: {MAX_SYNC_BUILD_VARIANTS}" in response.text
+    )
+    assert "Свой диапазон" in response.text
+    assert "Собрать выбранный диапазон" in response.text
     assert "Собрать отмеченные главы" in response.text
     assert "Собираю EPUB…" in response.text
-    assert "Загружаю выбранные главы и иллюстрации, затем упаковываю EPUB. Не закрывайте эту вкладку." in response.text
-    assert 'data-build-active-state' in response.text
-    assert 'data-build-complete-state' in response.text
+    assert (
+        "Загружаю выбранные главы и иллюстрации, затем упаковываю EPUB. Не закрывайте эту вкладку."
+        in response.text
+    )
+    assert "data-build-active-state" in response.text
+    assert "data-build-complete-state" in response.text
     assert "Файл готов / скачивание началось." in response.text
-    assert 'data-build-error-state' in response.text
+    assert "data-build-error-state" in response.text
     assert "fetch('/build-jobs'" in response.text
     assert "pollJob" in response.text
     assert "/build-jobs/${encodeURIComponent(jobId)}" in response.text
@@ -278,7 +339,10 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
         in response.text
     )
     assert "triggerDownload" in response.text
-    assert "используйте фильтры ветки/диапазона или разделите тайтл на несколько EPUB-файлов" in response.text
+    assert (
+        "используйте фильтры ветки/диапазона или разделите тайтл на несколько EPUB-файлов"
+        in response.text
+    )
     assert "background worker" not in response.text.lower()
     assert "progress polling" not in response.text.lower()
     assert "Предупреждения" in response.text
@@ -293,12 +357,15 @@ def test_inventory_preview_uses_fake_service_without_network() -> None:
 def test_inventory_preview_omits_warnings_card_when_clean() -> None:
     service = FakeRowLevelBranchInventoryService()
     app.dependency_overrides[get_inventory_service] = lambda: service
-    app.dependency_overrides[get_title_detail_service] = lambda: FakeTitleDetailService()
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
     client = TestClient(app)
 
     try:
         response = client.get(
-            "/inventory", params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"}
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -338,10 +405,14 @@ def test_build_jobs_busy_response_is_controlled_russian_message() -> None:
     assert service.calls == []
 
 
-def test_inventory_preview_accepts_manga_url_with_fake_service_without_network() -> None:
+def test_inventory_preview_accepts_manga_url_with_fake_service_without_network() -> (
+    None
+):
     service = FakeInventoryService()
     app.dependency_overrides[get_inventory_service] = lambda: service
-    app.dependency_overrides[get_title_detail_service] = lambda: FakeTitleDetailService()
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
     client = TestClient(app)
 
     try:
@@ -372,11 +443,15 @@ def test_inventory_preview_accepts_manga_url_with_fake_service_without_network()
 def test_inventory_preview_rejects_invalid_url_without_fetching() -> None:
     service = FakeInventoryService()
     app.dependency_overrides[get_inventory_service] = lambda: service
-    app.dependency_overrides[get_title_detail_service] = lambda: FakeTitleDetailService()
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
     client = TestClient(app)
 
     try:
-        response = client.get("/inventory", params={"title_url": "https://example.test/book/1--bad"})
+        response = client.get(
+            "/inventory", params={"title_url": "https://example.test/book/1--bad"}
+        )
     finally:
         app.dependency_overrides.clear()
 
@@ -409,7 +484,10 @@ def test_build_route_returns_epub_download_from_fake_service() -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/epub+zip"
-    assert response.headers["content-disposition"] == 'attachment; filename="demo-title.epub"'
+    assert (
+        response.headers["content-disposition"]
+        == 'attachment; filename="demo-title.epub"'
+    )
     assert response.content == b"fake epub bytes"
     assert len(service.calls) == 1
     title, metadata, variants, include_images = service.calls[0]
@@ -571,7 +649,10 @@ def test_build_filename_remains_slug_based_with_free_form_title() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.headers["content-disposition"] == 'attachment; filename="demo-title.epub"'
+    assert (
+        response.headers["content-disposition"]
+        == 'attachment; filename="demo-title.epub"'
+    )
 
 
 def test_build_route_rejects_empty_selection_before_build_service() -> None:
@@ -581,7 +662,8 @@ def test_build_route_rejects_empty_selection_before_build_service() -> None:
 
     try:
         response = client.post(
-            "/build", data={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"}
+            "/build",
+            data={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -661,26 +743,31 @@ def test_build_route_rejects_invalid_title_url_without_stack_trace() -> None:
 def test_inventory_preview_renders_branch_card_range_controls() -> None:
     service = FakeInventoryService()
     app.dependency_overrides[get_inventory_service] = lambda: service
-    app.dependency_overrides[get_title_detail_service] = lambda: FakeTitleDetailService()
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
     client = TestClient(app)
 
     try:
         response = client.get(
-            "/inventory", params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"}
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
         )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert "Выбрать диапазон внутри этой ветки" in response.text
+    assert "Свой диапазон" in response.text
+    assert "С главы" in response.text
+    assert "по главу" in response.text
     assert 'name="bulk_variant"' in response.text
     assert response.text.count('name="bulk_variant"') == 1
     assert 'name="bulk_branch_id"' in response.text
     assert 'value="55"' in response.text
     assert "Team A" in response.text
     assert "ID ветки: 55" in response.text
-    assert 'name="volume_from"' in response.text
-    assert 'name="volume_to"' in response.text
+    assert 'type="hidden" name="volume_from"' in response.text
+    assert 'type="hidden" name="volume_to"' in response.text
     assert 'name="chapter_from"' in response.text
     assert 'name="chapter_to"' in response.text
 
@@ -688,12 +775,15 @@ def test_inventory_preview_renders_branch_card_range_controls() -> None:
 def test_inventory_preview_renders_row_level_branch_id_variant() -> None:
     service = FakeRowLevelBranchInventoryService()
     app.dependency_overrides[get_inventory_service] = lambda: service
-    app.dependency_overrides[get_title_detail_service] = lambda: FakeTitleDetailService()
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
     client = TestClient(app)
 
     try:
         response = client.get(
-            "/inventory", params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"}
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -701,7 +791,7 @@ def test_inventory_preview_renders_row_level_branch_id_variant() -> None:
     assert response.status_code == 200
     assert "Нет доступных для сборки вариантов." not in response.text
     assert "ID ветки: 55" in response.text
-    assert "Глав доступно: 1" in response.text
+    assert "Доступно для сборки: 1 глав" in response.text
     assert "Row branch" in response.text
     assert "Team A" in response.text
     assert 'name="selected_variant"' in response.text
@@ -711,12 +801,15 @@ def test_inventory_preview_renders_row_level_branch_id_variant() -> None:
 def test_inventory_preview_renders_default_branch_variant() -> None:
     service = FakeDefaultBranchInventoryService()
     app.dependency_overrides[get_inventory_service] = lambda: service
-    app.dependency_overrides[get_title_detail_service] = lambda: FakeTitleDetailService()
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
     client = TestClient(app)
 
     try:
         response = client.get(
-            "/inventory", params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"}
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -724,7 +817,7 @@ def test_inventory_preview_renders_default_branch_variant() -> None:
     assert response.status_code == 200
     assert "Нет доступных для сборки вариантов." not in response.text
     assert "ID ветки: default" in response.text
-    assert "Глав доступно: 1" in response.text
+    assert "Доступно для сборки: 1 глав" in response.text
     assert "solotranslating" in response.text
     assert 'name="selected_variant"' in response.text
     assert "&quot;is_default_branch&quot;:true" in response.text
@@ -788,7 +881,9 @@ def test_build_route_checked_mode_uses_selected_variants() -> None:
     assert include_images is False
 
 
-def test_build_route_checked_mode_rejects_empty_selection_before_build_service() -> None:
+def test_build_route_checked_mode_rejects_empty_selection_before_build_service() -> (
+    None
+):
     service = FakeBuildService()
     app.dependency_overrides[get_build_service] = lambda: service
     client = TestClient(app)
@@ -857,7 +952,9 @@ def test_build_route_accepts_bulk_payload_with_include_images_checked() -> None:
             "/build",
             data={
                 "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
-                "bulk_variant": _variant_payload(external_chapter_id=101, branch_id=55, number="1"),
+                "bulk_variant": _variant_payload(
+                    external_chapter_id=101, branch_id=55, number="1"
+                ),
                 "include_images": "true",
             },
         )
@@ -935,18 +1032,24 @@ def test_build_route_rejects_malformed_bulk_payload_before_build_service() -> No
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert "Глава из диапазона на позиции 1 содержит некорректные данные" in response.text
+    assert (
+        "Глава из диапазона на позиции 1 содержит некорректные данные" in response.text
+    )
     assert service.calls == []
 
 
 def _variant_payloads(count: int) -> list[str]:
     return [
-        _variant_payload(external_chapter_id=1000 + index, branch_id=55, number=str(index))
+        _variant_payload(
+            external_chapter_id=1000 + index, branch_id=55, number=str(index)
+        )
         for index in range(1, count + 1)
     ]
 
 
-def test_build_route_rejects_manual_selection_over_sync_limit_before_build_service() -> None:
+def test_build_route_rejects_manual_selection_over_sync_limit_before_build_service() -> (
+    None
+):
     service = FakeBuildService()
     app.dependency_overrides[get_build_service] = lambda: service
     client = TestClient(app)
@@ -969,7 +1072,9 @@ def test_build_route_rejects_manual_selection_over_sync_limit_before_build_servi
     assert service.calls == []
 
 
-def test_build_route_rejects_bulk_selection_over_sync_limit_before_build_service() -> None:
+def test_build_route_rejects_bulk_selection_over_sync_limit_before_build_service() -> (
+    None
+):
     service = FakeBuildService()
     app.dependency_overrides[get_build_service] = lambda: service
     client = TestClient(app)
@@ -1019,14 +1124,17 @@ def test_build_route_dedupes_before_sync_limit_check() -> None:
     service = FakeBuildService()
     app.dependency_overrides[get_build_service] = lambda: service
     client = TestClient(app)
-    duplicated_payload = _variant_payload(external_chapter_id=101, branch_id=55, number="1")
+    duplicated_payload = _variant_payload(
+        external_chapter_id=101, branch_id=55, number="1"
+    )
 
     try:
         response = client.post(
             "/build",
             data={
                 "title_url": "https://ranobelib.me/ru/book/12345--demo-title",
-                "selected_variant": [duplicated_payload] * (MAX_SYNC_BUILD_VARIANTS + 1),
+                "selected_variant": [duplicated_payload]
+                * (MAX_SYNC_BUILD_VARIANTS + 1),
             },
         )
     finally:
@@ -1042,12 +1150,15 @@ def test_build_route_dedupes_before_sync_limit_check() -> None:
 def test_inventory_preview_falls_back_when_title_detail_is_unavailable() -> None:
     service = FakeInventoryService()
     app.dependency_overrides[get_inventory_service] = lambda: service
-    app.dependency_overrides[get_title_detail_service] = lambda: FakeTitleDetailService(fail=True)
+    app.dependency_overrides[get_title_detail_service] = lambda: FakeTitleDetailService(
+        fail=True
+    )
     client = TestClient(app)
 
     try:
         response = client.get(
-            "/inventory", params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"}
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -1057,3 +1168,159 @@ def test_inventory_preview_falls_back_when_title_detail_is_unavailable() -> None
     assert 'class="title-cover"' not in response.text
     assert 'name="book_title" value="demo-title"' in response.text
     assert 'type="hidden" name="language" value="ru"' in response.text
+
+
+def test_single_volume_large_branch_uses_practical_chunk_ui() -> None:
+    app.dependency_overrides[get_inventory_service] = (
+        lambda: FakeManyChaptersInventoryService(200)
+    )
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "Главы: 1–200" in response.text
+    assert "Том: 1" in response.text
+    assert "Доступно для сборки: 200 глав" in response.text
+    assert "Собрать главы 1–100" in response.text
+    assert "Собрать главы 101–200" in response.text
+    assert "Собрать главы 1–101" not in response.text
+    assert "Свой диапазон" in response.text
+    assert "С главы" in response.text
+    assert "по главу" in response.text
+    assert "<label>Том от" not in response.text
+    assert "<label>Том до" not in response.text
+    assert 'type="hidden" name="volume_from" value="1"' in response.text
+    assert 'type="hidden" name="volume_to" value="1"' in response.text
+
+
+def test_branch_under_limit_shows_build_whole_branch_action() -> None:
+    app.dependency_overrides[get_inventory_service] = (
+        lambda: FakeManyChaptersInventoryService(3)
+    )
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "Собрать всю ветку" in response.text
+    assert "Собрать главы 1–100" not in response.text
+
+
+def test_range_ui_contains_live_count_and_limit_messages() -> None:
+    app.dependency_overrides[get_inventory_service] = (
+        lambda: FakeManyChaptersInventoryService(125)
+    )
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "Будет собрано:" in response.text
+    assert "В этом диапазоне нет доступных глав." in response.text
+    assert (
+        "Выбрано ${count} глав — максимум ${maxBuild}. Разбейте диапазон на несколько EPUB."
+        in response.text
+    )
+    assert "customButton.disabled = true" in response.text
+
+
+def test_quick_range_action_posts_existing_backend_fields() -> None:
+    app.dependency_overrides[get_inventory_service] = (
+        lambda: FakeManyChaptersInventoryService(200)
+    )
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "data-quick-range-submit" in response.text
+    assert 'name="selection_mode" value="range"' in response.text
+    assert 'data-chapter-from="1" data-chapter-to="100"' in response.text
+    assert "['selection_mode', 'range']" in response.text
+    assert "['chapter_from', quick.dataset.chapterFrom]" in response.text
+    assert "['chapter_to', quick.dataset.chapterTo]" in response.text
+    assert "['volume_from', quick.dataset.volumeFrom]" in response.text
+    assert "['volume_to', quick.dataset.volumeTo]" in response.text
+
+
+def test_multiple_volume_branch_shows_primary_volume_fields() -> None:
+    app.dependency_overrides[get_inventory_service] = (
+        lambda: FakeManyChaptersInventoryService(150, volumes=("1", "2"))
+    )
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "Тома: 1–2" in response.text
+    assert "<label>Том от" in response.text
+    assert "<label>Том до" in response.text
+
+
+def test_default_branch_null_branch_id_keeps_quick_build_ui() -> None:
+    app.dependency_overrides[get_inventory_service] = (
+        lambda: FakeManyChaptersInventoryService(2, default_branch=True)
+    )
+    app.dependency_overrides[get_title_detail_service] = (
+        lambda: FakeTitleDetailService()
+    )
+    client = TestClient(app)
+
+    try:
+        response = client.get(
+            "/inventory",
+            params={"title_url": "https://ranobelib.me/ru/book/12345--demo-title"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "ID ветки: default" in response.text
+    assert "Собрать всю ветку" in response.text
+    assert "Нет доступных для сборки вариантов." not in response.text
