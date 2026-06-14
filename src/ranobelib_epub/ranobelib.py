@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from urllib.parse import urlparse
+
+
+_ALLOWED_HOSTS = {"ranobelib.me", "www.ranobelib.me"}
+_ALLOWED_SCHEMES = {"http", "https"}
+
+
+@dataclass(frozen=True, slots=True)
+class RanobeLibTitleUrl:
+    """Parsed public RanobeLib title URL."""
+
+    title_id: int
+    slug: str
+    locale: str | None
+
+    @property
+    def canonical_url(self) -> str:
+        locale_prefix = f"/{self.locale}" if self.locale else ""
+        return f"https://ranobelib.me{locale_prefix}/book/{self.title_id}--{self.slug}"
+
+
+def parse_title_url(raw_url: str) -> RanobeLibTitleUrl:
+    """Parse a public RanobeLib title URL without performing network requests.
+
+    Supported examples:
+    - https://ranobelib.me/ru/book/12345--title-slug
+    - https://ranobelib.me/book/12345--title-slug
+
+    Query strings and fragments are ignored. Chapter and branch URLs are intentionally
+    rejected because the MVP accepts only title pages.
+    """
+
+    url = raw_url.strip()
+    if not url:
+        raise ValueError("RanobeLib URL is empty")
+
+    parsed = urlparse(url)
+    if parsed.scheme not in _ALLOWED_SCHEMES:
+        raise ValueError("RanobeLib URL must use http or https")
+
+    host = parsed.hostname.lower() if parsed.hostname else ""
+    if host not in _ALLOWED_HOSTS:
+        raise ValueError("RanobeLib URL host must be ranobelib.me")
+
+    parts = [part for part in parsed.path.split("/") if part]
+    locale: str | None = None
+    if len(parts) == 3:
+        locale, book_segment, title_segment = parts
+        if len(locale) != 2 or not locale.isalpha():
+            raise ValueError("RanobeLib locale segment must be a two-letter code")
+    elif len(parts) == 2:
+        book_segment, title_segment = parts
+    else:
+        raise ValueError("RanobeLib URL must point to a title page")
+
+    if book_segment != "book":
+        raise ValueError("RanobeLib URL must contain /book/")
+
+    title_id_text, separator, slug = title_segment.partition("--")
+    if separator != "--" or not title_id_text.isdecimal() or not slug:
+        raise ValueError("RanobeLib title segment must look like 12345--title-slug")
+
+    return RanobeLibTitleUrl(title_id=int(title_id_text), slug=slug, locale=locale)
