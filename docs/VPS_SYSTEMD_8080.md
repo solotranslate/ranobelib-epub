@@ -11,6 +11,8 @@ Current runtime facts:
 - service name: `ranobelib-epub`;
 - HTTP port: `8080`.
 
+The current UI/operator workflow is documented in [OPERATOR_WORKFLOW.md](OPERATOR_WORKFLOW.md).
+
 The systemd unit itself lives on the VPS at:
 
 ```text
@@ -59,6 +61,8 @@ systemctl status ranobelib-epub --no-pager
 curl -sS http://127.0.0.1:8080/health
 ```
 
+Always restart the service after pulling new code so Uvicorn loads the updated Python modules.
+
 ## Logs
 
 Follow logs:
@@ -105,7 +109,12 @@ After an update, check:
 - the health endpoint responds on port `8080`;
 - the web UI opens;
 - a title URL opens the Russian build page;
+- a single-volume branch shows quick range actions such as `Собрать главы 1–100` and `Собрать главы 101–200`;
+- ordinary single-volume branches do not show confusing primary `Том от` / `Том до` filters;
 - a small chapter range builds and downloads;
+- the `Остановить` button cancels an active build and the page recovers;
+- a cancelled job does not download an EPUB;
+- a newly built EPUB table of contents does not append `.1` to unnamed ordinary chapters;
 - a second simultaneous build attempt shows the Russian busy message;
 - generated EPUBs, temporary files, logs, screenshots, and local debugging artifacts are not left in the repository checkout.
 
