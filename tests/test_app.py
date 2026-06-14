@@ -143,7 +143,15 @@ class FakeBuildService:
         variants: tuple[ChapterBranchVariant, ...],
         *,
         include_images: bool = False,
+        progress_callback=None,
     ) -> bytes:
+        if progress_callback is not None:
+            progress_callback(
+                "fetching_chapters",
+                message="Fetching chapter 1 of 1",
+                chapter_current=1,
+                chapter_total=1,
+            )
         self.calls.append((title, metadata, variants, include_images))
         return b"fake epub bytes"
 
