@@ -761,7 +761,10 @@ def test_inventory_preview_renders_branch_card_range_controls() -> None:
     assert "С главы" in response.text
     assert "по главу" in response.text
     assert 'name="bulk_variant"' in response.text
-    assert response.text.count('name="bulk_variant"') == 1
+    assert response.text.count('name="bulk_variant"') >= 1
+    assert "Собрать всю ветку" in response.text
+    assert 'name="selection_mode"' in response.text
+    assert 'value="range"' in response.text
     assert 'name="bulk_branch_id"' in response.text
     assert 'value="55"' in response.text
     assert "Team A" in response.text
