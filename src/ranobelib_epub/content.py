@@ -243,7 +243,11 @@ def _normalize_attachments(raw_attachments: Any, warnings: list[str]) -> dict[st
         attachments[name] = Attachment(
             name=name,
             url=_optional_str(
-                attachment.get("url") or attachment.get("path") or attachment.get("src")
+                attachment.get("url")
+                or attachment.get("previewUrl")
+                or attachment.get("originalUrl")
+                or attachment.get("path")
+                or attachment.get("src")
             ),
             width=_optional_int(attachment.get("width")),
             height=_optional_int(attachment.get("height")),
@@ -370,7 +374,16 @@ def _normalize_image(
         attachment=attachment,
         alt=_optional_str(attrs.get("alt")),
         title=_optional_str(attrs.get("title")),
-        src=_optional_str(image_meta.get("url") or attrs.get("src")),
+        src=_optional_str(
+            image_meta.get("url")
+            or image_meta.get("previewUrl")
+            or image_meta.get("originalUrl")
+            or image_meta.get("src")
+            or attrs.get("url")
+            or attrs.get("previewUrl")
+            or attrs.get("originalUrl")
+            or attrs.get("src")
+        ),
     )
 
 

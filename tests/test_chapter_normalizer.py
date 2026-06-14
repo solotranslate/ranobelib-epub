@@ -199,3 +199,62 @@ def test_normalize_chapter_payload_preserves_missing_image_attachment_with_warni
     assert image.name == "missing.png"
     assert image.attachment is None
     assert chapter.warnings == ("Image attachment 'missing.png' is missing; image preserved",)
+
+
+def test_normalize_chapter_payload_preserves_attachment_preview_original_url_fallbacks() -> None:
+    chapter = normalize_chapter_payload(
+        {
+            "data": {
+                "content": {"type": "doc", "content": []},
+                "attachments": [
+                    {"name": "preview.jpg", "previewUrl": "/uploads/ranobe/preview.jpg"},
+                    {"name": "original.jpg", "originalUrl": "/uploads/ranobe/original.jpg"},
+                ],
+            }
+        }
+    )
+
+    assert chapter.attachments["preview.jpg"].url == "/uploads/ranobe/preview.jpg"
+    assert chapter.attachments["original.jpg"].url == "/uploads/ranobe/original.jpg"
+
+
+def test_normalize_chapter_payload_preserves_image_meta_url_fallbacks() -> None:
+    preview = normalize_chapter_payload(
+        {
+            "data": {
+                "content": {
+                    "type": "doc",
+                    "content": [
+                        {
+                            "type": "image",
+                            "attrs": {"images": [{"previewUrl": "/uploads/preview.jpg"}]},
+                        }
+                    ],
+                },
+                "attachments": [],
+            }
+        }
+    )
+    original = normalize_chapter_payload(
+        {
+            "data": {
+                "content": {
+                    "type": "doc",
+                    "content": [
+                        {
+                            "type": "image",
+                            "attrs": {"images": [{"originalUrl": "/uploads/original.jpg"}]},
+                        }
+                    ],
+                },
+                "attachments": [],
+            }
+        }
+    )
+
+    preview_image = preview.blocks[0]
+    original_image = original.blocks[0]
+    assert isinstance(preview_image, Image)
+    assert isinstance(original_image, Image)
+    assert preview_image.src == "/uploads/preview.jpg"
+    assert original_image.src == "/uploads/original.jpg"

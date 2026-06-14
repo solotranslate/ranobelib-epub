@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable, Protocol
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -12,7 +13,7 @@ from ranobelib_epub.content import (
     Image,
     NormalizedChapter,
 )
-from ranobelib_epub.inventory import _public_headers
+from ranobelib_epub.inventory import RANOBELIB_API_BASE_URL, _public_headers
 
 _ALLOWED_IMAGE_TYPES = {
     "image/jpeg": ".jpg",
@@ -135,9 +136,14 @@ def collect_image_assets(
 
 def image_source_url(image: Image) -> str | None:
     url = image.attachment.url if image.attachment and image.attachment.url else image.src
-    if not url or not url.lower().startswith(("http://", "https://")):
+    if not url:
         return None
-    return url
+    parsed = urlparse(url)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return url
+    if not parsed.scheme and not parsed.netloc and url.startswith("/") and not url.startswith("//"):
+        return urljoin(f"{RANOBELIB_API_BASE_URL.rstrip('/')}/", url.lstrip("/"))
+    return None
 
 
 def _iter_images(chapters: Iterable[NormalizedChapter]) -> Iterable[Image]:

@@ -248,7 +248,7 @@ def test_httpx_image_fetcher_rejects_private_headers_before_request(monkeypatch)
     def fail_request(*args, **kwargs):
         raise AssertionError("request should not be sent")
 
-    monkeypatch.setattr("ranobelib_epub.images.httpx.request", fail_request)
+    monkeypatch.setattr("ranobelib_epub.images.httpx.stream", fail_request)
 
     fetcher = HttpxImageAssetFetcher(headers={"Cookie": "private=1"})
     with pytest.raises(ValueError, match="Forbidden private headers"):
@@ -281,3 +281,30 @@ def test_collect_image_assets_skips_too_large_image() -> None:
 
     assert assets == {}
     assert warnings == ("Image block 'large.png' skipped: image is too large",)
+
+
+def test_image_source_url_uses_fixed_public_base_for_root_relative_paths() -> None:
+    from ranobelib_epub.content import Attachment
+    from ranobelib_epub.images import image_source_url
+
+    image = Image(
+        name="cover.jpg",
+        attachment=Attachment("cover.jpg", url="/uploads/ranobe/cover.jpg"),
+    )
+
+    assert image_source_url(image) == "https://api.cdnlibs.org/uploads/ranobe/cover.jpg"
+
+
+def test_collect_image_assets_skips_unsupported_image_url_schemes() -> None:
+    from ranobelib_epub.images import ImageFetchLimits, collect_image_assets
+
+    class FailingFetcher:
+        def fetch_image(self, url, limits):
+            raise AssertionError("unsupported scheme should not be fetched")
+
+    chapter = _chapter(1, "TOC", "Generated", (Image(name="local", src="file:///tmp/a.jpg"),))
+
+    assets, warnings = collect_image_assets([chapter], FailingFetcher(), ImageFetchLimits())
+
+    assert assets == {}
+    assert warnings == ("Image block 'local' has no supported source URL; image skipped",)
