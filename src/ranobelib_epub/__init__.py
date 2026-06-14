@@ -8,6 +8,13 @@ from ranobelib_epub.epub import (
     build_epub_bytes as build_epub_bytes,
     write_epub as write_epub,
 )
+from ranobelib_epub.images import (
+    HttpxImageAssetFetcher as HttpxImageAssetFetcher,
+    ImageAsset as ImageAsset,
+    ImageAssetFetcher as ImageAssetFetcher,
+    ImageFetchLimits as ImageFetchLimits,
+    collect_image_assets as collect_image_assets,
+)
 
 __all__ = [
     "ChapterBuildResult",
@@ -16,4 +23,9 @@ __all__ = [
     "build_epub",
     "build_epub_bytes",
     "write_epub",
+    "HttpxImageAssetFetcher",
+    "ImageAsset",
+    "ImageAssetFetcher",
+    "ImageFetchLimits",
+    "collect_image_assets",
 ]

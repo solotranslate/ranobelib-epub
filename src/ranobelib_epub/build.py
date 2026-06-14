@@ -6,6 +6,7 @@ from typing import Sequence, cast
 from ranobelib_epub.chapter_client import fetch_chapter_content
 from ranobelib_epub.content import NormalizedChapter
 from ranobelib_epub.epub import BookMetadata, build_epub_bytes
+from ranobelib_epub.images import ImageAssetFetcher, ImageFetchLimits, collect_image_assets
 from ranobelib_epub.inventory import (
     RANOBELIB_API_BASE_URL,
     BuildableChapterVariant,
@@ -35,13 +36,16 @@ def build_selected_chapter_epub(
     transport: InventoryTransport,
     *,
     base_url: str = RANOBELIB_API_BASE_URL,
+    image_fetcher: ImageAssetFetcher | None = None,
+    image_limits: ImageFetchLimits | None = None,
 ) -> ChapterBuildResult:
     """Fetch selected buildable chapter variants in order and build EPUB bytes.
 
     The orchestration is intentionally read-only and DB-less. It validates the complete
     selection before the injected transport is used, fetches each selected variant through
     the existing chapter-content client, preserves input order, and returns the normalized
-    chapters, public request plans, normalizer warnings, and final EPUB bytes.
+    chapters, public request plans, normalizer/image warnings, and final EPUB bytes.
+    Images remain disabled by default; callers may opt in with a bounded read-only fetcher.
     """
 
     buildable_variants = _validate_selection(selected_variants)
@@ -56,8 +60,15 @@ def build_selected_chapter_epub(
         warnings.extend(content.warnings)
 
     normalized_chapters = tuple(chapters)
+    image_assets = None
+    if image_fetcher is not None:
+        image_assets, image_warnings = collect_image_assets(
+            normalized_chapters, image_fetcher, image_limits
+        )
+        warnings.extend(image_warnings)
+
     return ChapterBuildResult(
-        epub_bytes=build_epub_bytes(metadata, normalized_chapters),
+        epub_bytes=build_epub_bytes(metadata, normalized_chapters, image_assets=image_assets),
         chapters=normalized_chapters,
         request_plans=tuple(requests),
         warnings=tuple(warnings),
