@@ -15,11 +15,17 @@ A small web service where a user can paste a public RanobeLib title URL, select 
 - One active build at a time by default.
 - Runtime artifacts stay outside the repository.
 
+## Current operator workflow
+
+See [docs/OPERATOR_WORKFLOW.md](docs/OPERATOR_WORKFLOW.md) for the current UI workflow: quick range actions, custom range behavior, manual selection, build cancellation, EPUB TOC expectations, and post-update smoke checks.
+
 ## VPS operations
 
 The current VPS run mode uses a long-running `systemd` service on port `8080`.
 
-For VPS update, operation, smoke-check, troubleshooting, and safety-boundary guidance, see [docs/VPS_OPERATOR_RUNBOOK.md](docs/VPS_OPERATOR_RUNBOOK.md).
+For VPS update, operation, smoke-check, troubleshooting, and safety-boundary guidance, see [docs/VPS_SYSTEMD_8080.md](docs/VPS_SYSTEMD_8080.md).
+
+The older [docs/VPS_OPERATOR_RUNBOOK.md](docs/VPS_OPERATOR_RUNBOOK.md) is kept only as a compatibility pointer.
 
 ## Runtime paths
 
