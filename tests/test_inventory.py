@@ -406,3 +406,55 @@ def test_builds_read_only_chapter_content_request_plan_for_buildable_variant() -
         request.url
         == "https://api.example.test/api/manga/demo-title/chapter?branch_id=10&number=7&volume=3"
     )
+
+from ranobelib_epub.ranobelib import RanobeLibTitleUrl
+from ranobelib_epub.title_detail import build_title_detail_request, parse_title_detail
+
+
+def test_title_detail_parser_extracts_display_author_and_cover() -> None:
+    detail = parse_title_detail(
+        "demo-title",
+        {
+            "data": {
+                "rus_name": "Русское название",
+                "name": "English Name",
+                "eng_name": "Alt English",
+                "cover": {
+                    "thumbnail": "https://img.example.test/thumb.jpg",
+                    "md": "https://img.example.test/md.jpg",
+                    "default": "https://img.example.test/default.jpg",
+                },
+                "authors": [{"rus_name": "Автор Один", "name": "Author One"}],
+                "items_count": {"uploaded": 42},
+                "status": {"label": "Онгоинг"},
+                "type": {"label": "Япония"},
+            }
+        },
+    )
+
+    assert detail.display_title == "Русское название"
+    assert detail.author == "Автор Один"
+    assert detail.cover_url == "https://img.example.test/default.jpg"
+    assert detail.uploaded_count == 42
+    assert detail.status_label == "Онгоинг"
+    assert detail.type_label == "Япония"
+
+
+def test_title_detail_parser_falls_back_when_fields_are_missing() -> None:
+    detail = parse_title_detail("demo-title", {"data": {}})
+
+    assert detail.display_title == "demo-title"
+    assert detail.author == ""
+    assert detail.cover_url is None
+
+
+def test_title_detail_request_uses_public_get_with_safe_headers() -> None:
+    request = build_title_detail_request(
+        RanobeLibTitleUrl(title_id=12345, slug="demo-title", locale="ru"),
+        base_url="https://api.example.test/",
+    )
+
+    assert request.method == "GET"
+    assert request.url.startswith("https://api.example.test/api/manga/12345--demo-title?")
+    assert "fields%5B%5D=eng_name" in request.url
+    assert request.headers == {"Accept": "application/json", "Site-Id": "3"}

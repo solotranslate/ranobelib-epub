@@ -14,6 +14,12 @@ from ranobelib_epub.images import HttpxImageAssetFetcher, ImageFetchLimits
 from ranobelib_epub.inventory import ChapterInventory, fetch_chapter_inventory
 from ranobelib_epub.inventory import ChapterBranchVariant, HttpxInventoryTransport
 from ranobelib_epub.ranobelib import RanobeLibTitleUrl, parse_title_url
+from ranobelib_epub.title_detail import (
+    HttpxTitleDetailTransport,
+    TitleDetailMetadata,
+    fallback_title_detail,
+    fetch_title_detail,
+)
 
 app = FastAPI(title="RanobeLib EPUB Builder")
 MAX_SYNC_BUILD_VARIANTS = 100
@@ -23,6 +29,10 @@ _LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 
 class InventoryService(Protocol):
     def fetch(self, title: RanobeLibTitleUrl) -> ChapterInventory: ...
+
+
+class TitleDetailService(Protocol):
+    def fetch(self, title: RanobeLibTitleUrl) -> TitleDetailMetadata: ...
 
 
 class RanobeLibInventoryService:
@@ -35,6 +45,18 @@ class RanobeLibInventoryService:
 
 def get_inventory_service() -> InventoryService:
     return RanobeLibInventoryService()
+
+
+class RanobeLibTitleDetailService:
+    def __init__(self, transport: HttpxTitleDetailTransport | None = None) -> None:
+        self._transport = transport or HttpxTitleDetailTransport()
+
+    def fetch(self, title: RanobeLibTitleUrl) -> TitleDetailMetadata:
+        return fetch_title_detail(title, self._transport)
+
+
+def get_title_detail_service() -> TitleDetailService:
+    return RanobeLibTitleDetailService()
 
 
 class BuildService(Protocol):
@@ -146,6 +168,7 @@ def index() -> str:
 def inventory_preview(
     title_url: str = Query(..., min_length=1),
     service: InventoryService = Depends(get_inventory_service),
+    title_detail_service: TitleDetailService = Depends(get_title_detail_service),
 ) -> HTMLResponse:
     try:
         title = parse_title_url(title_url)
@@ -157,7 +180,12 @@ def inventory_preview(
     except ValueError as exc:
         return _error_page(str(exc), status_code=400)
 
-    return HTMLResponse(_inventory_page(title, inventory))
+    try:
+        title_detail = title_detail_service.fetch(title)
+    except Exception:
+        title_detail = fallback_title_detail(title.slug)
+
+    return HTMLResponse(_inventory_page(title, inventory, title_detail))
 
 
 @app.post("/build", response_class=Response, response_model=None)
@@ -494,54 +522,55 @@ def _epub_filename(title: RanobeLibTitleUrl) -> str:
     return f"{stem or 'ranobelib-title'}.epub"
 
 
-def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> str:
-    branch_cards = _branch_cards(title, inventory)
+def _inventory_page(
+    title: RanobeLibTitleUrl, inventory: ChapterInventory, title_detail: TitleDetailMetadata
+) -> str:
+    branch_cards = _branch_cards(title, inventory, title_detail)
     warning_items = "\n".join(
         f"<li>{escape(warning.message)}"
         f" (logical: {escape(str(warning.logical_id))}, variant: {escape(str(warning.variant_id))})</li>"
         for warning in inventory.warnings
     ) or "<li>No warnings</li>"
+    cover_html = _title_cover_html(title_detail)
+    title_pills = _title_pills(title_detail, inventory)
     return f"""
 <!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>Inventory preview</title>
+  <title>Build EPUB</title>
   <style>
     :root {{ color-scheme: light; }}
     body{{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:1180px;margin:32px auto;padding:0 16px;line-height:1.45;background:#f7f7fb;color:#1f2937}}
-    h1,h2,h3{{line-height:1.15}} .page-head,.card,.branch-card{{background:#fff;border:1px solid #d9deea;border-radius:18px;box-shadow:0 8px 24px rgba(15,23,42,.06)}}
-    .page-head,.card{{padding:22px;margin-bottom:18px}} .summary{{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:0}}
-    .summary div{{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:10px}} .summary dt{{font-size:.82rem;color:#64748b}} .summary dd{{margin:2px 0 0;font-weight:700}}
+    h1,h2,h3{{line-height:1.15}} .title-card,.card,.branch-card{{background:#fff;border:1px solid #d9deea;border-radius:18px;box-shadow:0 8px 24px rgba(15,23,42,.06)}}
+    .title-card,.card{{padding:22px;margin-bottom:18px}} .title-card{{display:flex;gap:18px;align-items:flex-start}} .title-cover{{width:112px;max-width:30vw;border-radius:12px;border:1px solid #d9deea;object-fit:cover;background:#f8fafc}} .title-meta{{min-width:0}} .title-meta h1{{margin:.1rem 0 .4rem}} .title-meta p{{margin:.25rem 0}}
     .settings-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}} label{{display:block;font-weight:650}} input,select,button{{font:inherit;border-radius:10px;border:1px solid #bfc7d5;padding:9px 11px}} input[type="text"],input[type="url"],input:not([type]){{width:100%;box-sizing:border-box;margin-top:5px}} input[type="checkbox"]{{margin-right:8px}} button{{cursor:pointer;background:#243b63;color:#fff;border-color:#243b63;font-weight:700}} button.secondary{{background:#fff;color:#243b63}}
-    .muted{{color:#64748b;font-size:.95rem}} .ok{{color:#176b32}} .bad{{color:#9f1d1d}} .branches{{display:grid;gap:18px}} .branch-card{{padding:0;overflow:hidden}} .branch-header{{padding:18px 20px;background:#eef4ff;border-bottom:1px solid #d9deea}} .branch-meta{{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}} .pill{{background:#fff;border:1px solid #cbd5e1;border-radius:999px;padding:4px 9px;font-size:.88rem}}
+    .muted{{color:#64748b;font-size:.95rem}} .ok{{color:#176b32}} .bad{{color:#9f1d1d}} .branches{{display:grid;gap:18px}} .branch-card{{padding:0;overflow:hidden}} .branch-header{{padding:18px 20px;background:#eef4ff;border-bottom:1px solid #d9deea}} .branch-meta,.title-pills{{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}} .pill{{background:#fff;border:1px solid #cbd5e1;border-radius:999px;padding:4px 9px;font-size:.88rem}}
     .branch-body{{padding:18px 20px}} .range{{border:1px dashed #b6c2d6;border-radius:14px;padding:14px;margin-bottom:16px;background:#fbfdff}} .range-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}} .volume-group{{margin:16px 0}} .volume-title{{font-size:1rem;margin:0 0 8px}} table{{border-collapse:collapse;width:100%;background:#fff}} td,th{{border:1px solid #e2e8f0;padding:8px;text-align:left;vertical-align:top}} th{{background:#f8fafc}} .actions{{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}} .progress-note,.build-complete,.build-error{{display:none;margin-top:12px;padding:12px;border-radius:12px;border:1px solid #bfdbfe}} .progress-note{{background:#eff6ff}} .build-complete{{background:#ecfdf5;border-color:#bbf7d0}} .build-error{{background:#fef2f2;border-color:#fecaca}} .is-building .progress-note,.is-complete .build-complete,.has-build-error .build-error{{display:block}} .is-building button[type="submit"]{{opacity:.7;cursor:wait}} .bar{{height:8px;border-radius:999px;background:linear-gradient(90deg,#93c5fd,#dbeafe,#93c5fd);background-size:200% 100%;animation:indeterminate 1.2s linear infinite}} @keyframes indeterminate{{from{{background-position:200% 0}}to{{background-position:-200% 0}}}}
   </style>
 </head>
 <body>
   <main>
-    <section class="page-head">
-      <h1>Inventory preview</h1>
-      <dl class="summary">
-        <div><dt>Canonical URL</dt><dd><a href="{escape(title.canonical_url)}">{escape(title.canonical_url)}</a></dd></div>
-        <div><dt>Slug</dt><dd>{escape(title.slug)}</dd></div>
-        <div><dt>Logical chapters</dt><dd>{len(inventory.logical_chapters)}</dd></div>
-        <div><dt>Variants</dt><dd>{len(inventory.variants)}</dd></div>
-        <div><dt>Buildable variants</dt><dd>{len(inventory.buildable_variants)}</dd></div>
-        <div><dt>Synchronous build limit</dt><dd>{MAX_SYNC_BUILD_VARIANTS} variants</dd></div>
-      </dl>
+    <section class="title-card" aria-labelledby="title-name">
+      {cover_html}
+      <div class="title-meta">
+        <h1 id="title-name">{escape(title_detail.display_title)}</h1>
+        {_author_line(title_detail)}
+        <p class="muted"><a href="{escape(title.canonical_url, quote=True)}">{escape(title.canonical_url)}</a></p>
+        {title_pills}
+      </div>
     </section>
 
     <section class="card" aria-labelledby="settings-title">
       <h2 id="settings-title">Build settings</h2>
       <p class="muted">These EPUB metadata fields are copied into the branch build you submit. Current synchronous build limit: {MAX_SYNC_BUILD_VARIANTS} chapter variants per EPUB build; the server enforces this limit authoritatively.</p>
       <div class="settings-grid" id="build-settings">
-        <label>Book title <input data-build-setting name="book_title" value="{escape(title.slug, quote=True)}" required></label>
-        <label>Author <input data-build-setting name="author" placeholder="optional"></label>
-        <label>Translator <input data-build-setting name="translator" placeholder="optional"></label>
-        <label>Team <input data-build-setting name="team" placeholder="optional"></label>
-        <label>Language <input data-build-setting name="language" value="ru" required></label>
-        <label><input data-build-setting type="checkbox" name="include_images" value="true"> Include images</label>
+        <label>Book title <input data-build-setting name="book_title" value="{escape(title_detail.display_title, quote=True)}" required></label>
+        <label>Author <input data-build-setting name="author" value="{escape(title_detail.author, quote=True)}"></label>
+        <input data-build-setting type="hidden" name="language" value="ru">
+        <input data-build-setting type="hidden" name="translator" value="">
+        <input data-build-setting type="hidden" name="team" value="">
+        <label><input data-build-setting type="checkbox" name="include_images" value="true" checked> Include images</label>
       </div>
       <p class="muted">Images can make the build slower and the EPUB larger. They are fetched read-only during this build only, bounded by limits, not cached/stored.</p>
       <p class="muted">For larger titles, use branch/range filters or split the title into multiple EPUB files.</p>
@@ -578,6 +607,10 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
     document.querySelectorAll('form[data-branch-form]').forEach((form) => {{
       form.addEventListener('submit', async (event) => {{
         form.querySelectorAll('[data-mirrored-setting]').forEach((node) => node.remove());
+        const includeImages = document.querySelector('[data-build-setting][name="include_images"]');
+        form.querySelectorAll('[data-default-include-images]').forEach((node) => {{
+          node.disabled = includeImages && !includeImages.checked;
+        }});
         settings.forEach((source) => {{
           if (source.type === 'checkbox' && !source.checked) return;
           const hidden = document.createElement('input');
@@ -624,7 +657,37 @@ def _inventory_page(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> st
 """
 
 
-def _branch_cards(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> str:
+def _title_cover_html(title_detail: TitleDetailMetadata) -> str:
+    if not title_detail.cover_url:
+        return ""
+    return (
+        f'<img class="title-cover" src="{escape(title_detail.cover_url, quote=True)}" '
+        f'alt="{escape(title_detail.display_title, quote=True)} cover">'
+    )
+
+
+def _author_line(title_detail: TitleDetailMetadata) -> str:
+    if not title_detail.author:
+        return ""
+    return f'<p><strong>Author:</strong> {escape(title_detail.author)}</p>'
+
+
+def _title_pills(title_detail: TitleDetailMetadata, inventory: ChapterInventory) -> str:
+    pills = [f"Buildable chapters: {len(inventory.buildable_variants)}"]
+    if title_detail.uploaded_count is not None:
+        pills.append(f"Uploaded: {title_detail.uploaded_count}")
+    if title_detail.status_label:
+        pills.append(f"Status: {title_detail.status_label}")
+    if title_detail.type_label:
+        pills.append(f"Type: {title_detail.type_label}")
+    return '<div class="title-pills">' + "".join(
+        f'<span class="pill">{escape(str(pill))}</span>' for pill in pills
+    ) + "</div>"
+
+
+def _branch_cards(
+    title: RanobeLibTitleUrl, inventory: ChapterInventory, title_detail: TitleDetailMetadata
+) -> str:
     groups: dict[str, list[ChapterBranchVariant]] = {}
     for variant in inventory.buildable_variants:
         groups.setdefault(_branch_key(variant), []).append(variant)
@@ -632,7 +695,7 @@ def _branch_cards(title: RanobeLibTitleUrl, inventory: ChapterInventory) -> str:
         return '<article class="branch-card"><div class="branch-body"><p class="bad">No buildable variants available.</p></div></article>'
     cards = []
     for branch_id, variants in groups.items():
-        cards.append(_branch_card(title, branch_id, tuple(variants), inventory.variants))
+        cards.append(_branch_card(title, branch_id, tuple(variants), inventory.variants, title_detail))
     return "\n".join(cards)
 
 
@@ -641,6 +704,7 @@ def _branch_card(
     branch_id: str,
     variants: tuple[ChapterBranchVariant, ...],
     all_variants: tuple[ChapterBranchVariant, ...],
+    title_detail: TitleDetailMetadata,
 ) -> str:
     label = _branch_label(variants[0])
     vol_min, vol_max = _number_bounds([variant.volume for variant in variants])
@@ -656,8 +720,12 @@ def _branch_card(
       <article class="branch-card">
         <form action="/build" method="post" data-branch-form data-branch-size="{len(variants)}">
           <input type="hidden" name="title_url" value="{escape(title.canonical_url, quote=True)}">
-          <input type="hidden" name="book_title" value="{escape(title.slug, quote=True)}">
+          <input type="hidden" name="book_title" value="{escape(title_detail.display_title, quote=True)}">
+          <input type="hidden" name="author" value="{escape(title_detail.author, quote=True)}">
+          <input type="hidden" name="translator" value="">
+          <input type="hidden" name="team" value="">
           <input type="hidden" name="language" value="ru">
+          <input type="hidden" name="include_images" value="true" data-default-include-images>
           <input type="hidden" name="bulk_branch_id" value="{escape(branch_id, quote=True)}">
           {hidden_bulk}
           <header class="branch-header">
