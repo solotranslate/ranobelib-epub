@@ -8,6 +8,8 @@ from ranobelib_epub.inventory import (
     build_inventory_request,
     parse_chapter_inventory,
 )
+from ranobelib_epub.ranobelib import RanobeLibTitleUrl
+from ranobelib_epub.title_detail import build_title_detail_request, parse_title_detail
 
 
 def test_httpx_transport_rejects_non_get_requests_before_sending(
@@ -407,9 +409,6 @@ def test_builds_read_only_chapter_content_request_plan_for_buildable_variant() -
         == "https://api.example.test/api/manga/demo-title/chapter?branch_id=10&number=7&volume=3"
     )
 
-from ranobelib_epub.ranobelib import RanobeLibTitleUrl
-from ranobelib_epub.title_detail import build_title_detail_request, parse_title_detail
-
 
 def test_title_detail_parser_extracts_display_author_and_cover() -> None:
     detail = parse_title_detail(
@@ -438,7 +437,6 @@ def test_title_detail_parser_extracts_display_author_and_cover() -> None:
     assert detail.uploaded_count == 42
     assert detail.status_label == "Онгоинг"
     assert detail.type_label == "Япония"
-
 
 def test_title_detail_parser_falls_back_when_fields_are_missing() -> None:
     detail = parse_title_detail("demo-title", {"data": {}})
